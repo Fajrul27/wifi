@@ -4,7 +4,6 @@ import { socket } from "../../services/socket";
 import MapPicker from "../../components/MapPicker";
 import OltPortManager from "./components/OltPortManager";
 import TopologyTreeView from "./components/TopologyTreeView";
-import SplitterManager from "./components/SplitterManager";
 import PppoeManager from "./components/PppoeManager";
 import TopologyFlowChart from "./components/TopologyFlowChart";
 
@@ -120,19 +119,7 @@ export default function FtthTopologyManager() {
     }
   }, [selectedRouter]);
 
-  // Refresh hanya data PPPoE user di background — TANPA kedipan loading
-  const silentRefreshUsers = useCallback(async (routerId) => {
-    if (!routerId) return;
-    try {
-      const res = await api.get(`/pppoe/${routerId}`);
-      const users = extractDataArray(res);
-      if (users.length > 0 || res?.data) {
-        setPppoeUsers(users);
-      }
-    } catch (err) {
-      console.error("Silent user refresh failed:", err);
-    }
-  }, []);
+
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -190,7 +177,6 @@ export default function FtthTopologyManager() {
 
   /* ───────────────── HELPERS ───────────────── */
   const getRouterName = (id) => routers.find(r => r.id === id)?.name || `Router #${id}`;
-  const getNodeName = (id) => nodes.find(n => n.id === id)?.name || `Node #${id}`;
 
   const getCableLabel = (type) => {
     const map = {
@@ -228,16 +214,6 @@ export default function FtthTopologyManager() {
               Math.sin(Δλ/2) * Math.sin(Δλ/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return Math.round(R * c);
-  };
-
-  const getOdpAvailablePorts = (odpNode) => {
-    const nodeSplitters = splitters.filter(s => s.nodeId === odpNode?.id);
-    let totalPorts = 0, usedPorts = 0;
-    nodeSplitters.forEach(s => {
-      totalPorts += s.outputPort || 0;
-      usedPorts += (s.outputs || []).filter(o => o.isUsed).length;
-    });
-    return Math.max(0, totalPorts - usedPorts);
   };
 
   /* ───────────────── FILTERED DATA ───────────────── */

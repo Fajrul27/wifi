@@ -13,12 +13,10 @@ function calcNodeStatus(node, splitters, realtimeTopology) {
   // Hitung dari splitter outputs
   const nodeSplitters = splitters.filter(s => Number(s.nodeId) === Number(node.id));
   let totalClients = 0;
-  let usedPorts = 0;
   nodeSplitters.forEach(s => {
     (s.outputs || []).forEach(o => {
       if (o.isUsed && o.clientId) {
         totalClients++;
-        usedPorts++;
       }
     });
   });
