@@ -67,7 +67,7 @@ export default function FtthTopologyManager() {
   const [nodeForm, setNodeForm] = useState({
     id: null, name: "", type: "ODC", oltPortId: "", parentNodeId: "",
     latitude: "", longitude: "", description: "", cableType: "BACKBONE_12_CORE",
-    totalCore: 12, distanceMeter: ""
+    totalCore: 12, distanceMeter: "", splitterType: "SPLITTER_1_8"
   });
   const [splitterForm, setSplitterForm] = useState({
     id: null, nodeId: "", type: "SPLITTER_1_8", outputPort: 8, name: "", description: ""
@@ -288,6 +288,7 @@ export default function FtthTopologyManager() {
         latitude: data?.latitude ?? '', longitude: data?.longitude ?? '',
         description: data?.description || '', cableType: parentLink?.cableType || 'BACKBONE_12_CORE',
         totalCore: parentLink?.totalCore || 12, distanceMeter: parentLink?.distanceMeter ?? '',
+        splitterType: data?.splitters?.[0]?.type || 'SPLITTER_1_8'
       });
     }
     if (type === 'splitter') {
@@ -379,6 +380,7 @@ export default function FtthTopologyManager() {
         cableType: nodeForm.parentNodeId ? nodeForm.cableType : undefined,
         totalCore: nodeForm.parentNodeId ? Number(nodeForm.totalCore) : undefined,
         distanceMeter: nodeForm.parentNodeId && nodeForm.distanceMeter !== '' ? Number(nodeForm.distanceMeter) : undefined,
+        splitterType: nodeForm.splitterType || undefined,
       };
       Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
       let res;
@@ -1036,6 +1038,21 @@ export default function FtthTopologyManager() {
                                  <i className="bi bi-lock-fill"></i> Terkunci otomatis ke Parent ODC
                                </small>
                              )}
+                           </div>
+                           <div className="col-12 mt-3">
+                             <label className="form-label small fw-bold text-secondary mb-1">Tipe Rasio Splitter Bawaan *</label>
+                             <select 
+                               className="form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none" 
+                               required 
+                               disabled={!!nodeForm.id}
+                               value={nodeForm.splitterType} 
+                               onChange={(e) => setNodeForm({ ...nodeForm, splitterType: e.target.value })}
+                             >
+                               {Object.entries(SPLITTER_TYPES).filter(([k]) => k !== 'NONE').map(([key, val]) => (
+                                 <option key={key} value={key}>{getSplitterLabel(key)} ({val} port output)</option>
+                               ))}
+                             </select>
+                             <small className="text-muted mt-1 d-block"><i className="bi bi-info-circle me-1"></i> Splitter dan port output akan dibuat secara otomatis di dalam node ini saat disimpan.</small>
                            </div>
                         </div>
                       )}

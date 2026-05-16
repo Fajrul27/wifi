@@ -69,151 +69,15 @@ function PortBar({ used, total }) {
   );
 }
 
-// ─────────────────────────────────────────────────
-// SPLITTER DETAIL (row per port)
-// ─────────────────────────────────────────────────
-function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssign, onUnassign, onEditSplitter, onDeleteSplitter }) {
-  const [open, setOpen] = useState(false);
-  const [expandedPorts, setExpandedPorts] = useState({});
-
-  const togglePort = (portId) => {
-    setExpandedPorts(prev => ({ ...prev, [portId]: !prev[portId] }));
-  };
-
-  const outputs = splitter.outputs || [];
-  const usedCount = outputs.filter(o => o.isUsed).length;
-
-  return (
-    <div style={{ marginTop: "6px", border: "1px dashed #cbd5e1", borderRadius: "8px", overflow: "hidden" }}>
-      <div
-        onClick={() => setOpen(v => !v)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", gap: "8px",
-          padding: "6px 12px", background: "#f8fafc", border: "none",
-          cursor: "pointer", fontSize: "0.8rem", color: "#475569", textAlign: "left"
-        }}
-      >
-        <i className="bi bi-diagram-3 text-primary" style={{ fontSize: "0.85rem" }} />
-        <span style={{ fontWeight: 600 }}>{splitter.name || `Splitter #${splitter.id}`}</span>
-        <span style={{ fontSize: "0.72rem", color: "#64748b" }}>({splitter.type?.replace("SPLITTER_", "").replace("_", ":")}) </span>
-        <PortBar used={usedCount} total={outputs.length} />
-
-        <div style={{ display: "flex", gap: "4px", marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
-          <button title="Edit Splitter" onClick={() => onEditSplitter && onEditSplitter(splitter)}
-            style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #d1d5db", borderRadius: "6px", background: "#f9fafb", color: "#374151", cursor: "pointer" }}>
-            <i className="bi bi-pencil" />
-          </button>
-          <button title="Hapus Splitter" onClick={() => onDeleteSplitter && onDeleteSplitter(splitter.id)}
-            style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #fca5a5", borderRadius: "6px", background: "#fff1f2", color: "#dc2626", cursor: "pointer" }}>
-            <i className="bi bi-trash" />
-          </button>
-          <button style={{ background: "none", border: "none", padding: "2px 4px", cursor: "pointer", color: "#64748b" }} onClick={() => setOpen(v => !v)}>
-            <i className={`bi bi-chevron-${open ? "up" : "down"}`} style={{ fontSize: "0.7rem" }} />
-          </button>
-        </div>
-      </div>
-
-      {open && (
-        <div style={{ padding: "8px 12px", background: "#fff" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            {outputs.map(o => {
-              const childNode = nodeChildren.find(cn => Number(cn.id) === Number(o.targetNodeId) || (o.targetNode && Number(cn.id) === Number(o.targetNode.id)));
-              const isPortExpanded = !!expandedPorts[o.id];
-
-              return (
-                <div key={o.id} style={{
-                  display: "flex", flexDirection: "column", gap: "6px", padding: "6px 10px",
-                  borderRadius: "6px", fontSize: "0.75rem",
-                  background: o.isUsed ? "#f0fdf4" : "#f8fafc",
-                  border: `1px solid ${o.isUsed ? "#bbf7d0" : "#e2e8f0"}`,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "nowrap" }}>
-                    <span style={{ fontWeight: 700, color: "#64748b", minWidth: "22px", flexShrink: 0 }}>#{o.portNumber}</span>
-                    {o.isUsed ? (
-                      <>
-                        {childNode || o.targetNode ? (
-                          <>
-                            <i className="bi bi-diagram-2-fill text-primary" style={{ flexShrink: 0 }} />
-                            <div 
-                              onClick={() => togglePort(o.id)}
-                              style={{ color: "#1d4ed8", fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", minWidth: 0 }}
-                            >
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{childNode?.name || o.targetNode?.name}</span>
-                              <i className={`bi bi-chevron-${isPortExpanded ? "up" : "down"} text-muted`} style={{ fontSize: "0.65rem", flexShrink: 0 }} />
-                            </div>
-                            <span style={{
-                              fontSize: "0.65rem", padding: "1px 6px", borderRadius: "10px",
-                              background: "#eff6ff", color: "#1d4ed8", fontWeight: 600, flexShrink: 0
-                            }}>
-                              {childNode?.type || o.targetNode?.type || "NODE"}
-                            </span>
-                          </>
-                        ) : ( o.client ? (
-                          <>
-                            <i className="bi bi-person-fill text-success" style={{ flexShrink: 0 }} />
-                            <span style={{ color: "#166534", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                              {o.client.username}
-                            </span>
-                            <span style={{
-                              fontSize: "0.65rem", padding: "1px 5px", borderRadius: "10px",
-                              background: o.client.isOnline ? "#dcfce7" : "#fee2e2",
-                              color: o.client.isOnline ? "#15803d" : "#dc2626", fontWeight: 600, flexShrink: 0
-                            }}>
-                              {o.client.isOnline ? "ON" : "OFF"}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <i className="bi bi-check-circle-fill text-success" style={{ flexShrink: 0 }} />
-                            <span style={{ color: "#166534", fontWeight: 500, flex: 1, minWidth: 0 }}>Terpakai</span>
-                          </>
-                        ))}
-                        <button
-                          title="Putuskan Jalur (Unassign)"
-                          onClick={() => onUnassign && onUnassign(o.id)}
-                          style={{ fontSize: "0.65rem", padding: "1px 6px", border: "1px solid #fca5a5", borderRadius: "8px", background: "#fff1f2", color: "#dc2626", cursor: "pointer", marginLeft: "auto", flexShrink: 0, display: "flex", alignItems: "center", gap: "4px" }}
-                        >
-                          <i className="bi bi-x-circle" /> Putuskan
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <i className="bi bi-dash-circle text-secondary" />
-                        <span style={{ color: "#94a3b8", flex: 1 }}>Kosong</span>
-                        <button
-                          onClick={() => onAssign && onAssign(o.id)}
-                          style={{ fontSize: "0.65rem", padding: "1px 6px", border: "1px solid #93c5fd", borderRadius: "8px", background: "#eff6ff", color: "#1d4ed8", cursor: "pointer" }}
-                        >
-                          + Assign
-                        </button>
-                      </>
-                    )}
-                  </div>
-
-                  {isPortExpanded && (childNode ? (
-                    <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px" }}>
-                      {renderTree([childNode], depth + 1)}
-                    </div>
-                  ) : o.targetNode ? (
-                    <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px" }}>
-                      {renderTree([{ ...o.targetNode, children: [] }], depth + 1)}
-                    </div>
-                  ) : null)}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// SplitterDetail removed in favor of direct NodeCard ports
 
 // ─────────────────────────────────────────────────
 // NODE CARD (ODC / ODP)
 // ─────────────────────────────────────────────────
 function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, onAddChild, onAddSplitter, onAssignClient, onUnassignPort, onEditSplitter, onDeleteSplitter, isLastChild, renderTree }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedPorts, setExpandedPorts] = useState({});
+  const togglePort = (portId) => setExpandedPorts(prev => ({ ...prev, [portId]: !prev[portId] }));
   const { status, reason, onlineClients, totalClients } = calcNodeStatus(node, splitters, realtimeTopology);
   const cfg = statusConfig(status);
   const nodeSplitters = splitters.filter(s => Number(s.nodeId) === Number(node.id));
@@ -280,7 +144,7 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
 
           {/* Node name */}
           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: "0.9rem", flex: 1 }}>
-            {node.name}
+            {node.name} {nodeSplitters.length > 0 ? `(${nodeSplitters.map(s => s.type?.replace("SPLITTER_", "").replace("_", ":")).join(", ")})` : ""}
           </span>
 
           {/* Status badge */}
@@ -316,11 +180,6 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
                 </button>
               </>
             )}
-            <button title="Add Splitter" onClick={() => onAddSplitter(node.id)}
-              style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #a5b4fc", borderRadius: "6px", background: "#eef2ff", color: "#4338ca", cursor: "pointer" }}>
-              <i className="bi bi-diagram-3 me-1" />+Splitter
-            </button>
-
             <button title="Edit" onClick={() => onEdit(node)}
               style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #d1d5db", borderRadius: "6px", background: "#f9fafb", color: "#374151", cursor: "pointer" }}>
               <i className="bi bi-pencil" />
@@ -332,12 +191,100 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
           </div>
         </div>
 
-        {/* Splitters detail */}
+        {/* Splitter ports directly inside NodeCard */}
         {!collapsed && nodeSplitters.length > 0 && (
-          <div style={{ padding: "0 14px 10px" }}>
-            {nodeSplitters.map(s => (
-              <SplitterDetail key={s.id} splitter={s} nodeChildren={node.children || []} renderTree={renderTree} depth={depth} onAssign={onAssignClient} onUnassign={onUnassignPort} onEditSplitter={onEditSplitter} onDeleteSplitter={onDeleteSplitter} />
-            ))}
+          <div style={{ padding: "0 14px 12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px", borderTop: "1px solid #e2e8f0", paddingTop: "10px" }}>
+              {nodeSplitters.flatMap((s, sIdx) => 
+                (s.outputs || []).map(o => {
+                  const childNode = (node.children || []).find(cn => Number(cn.id) === Number(o.targetNodeId) || (o.targetNode && Number(cn.id) === Number(o.targetNode.id)));
+                  const isPortExpanded = !!expandedPorts[o.id];
+                  const portLabel = nodeSplitters.length > 1 ? `S${sIdx+1}-#${o.portNumber}` : `#${o.portNumber}`;
+
+                  return (
+                    <div key={o.id} style={{
+                      display: "flex", flexDirection: "column", gap: "6px", padding: "6px 10px",
+                      borderRadius: "6px", fontSize: "0.75rem",
+                      background: o.isUsed ? "#f0fdf4" : "#f8fafc",
+                      border: `1px solid ${o.isUsed ? "#bbf7d0" : "#e2e8f0"}`,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "nowrap" }}>
+                        <span style={{ fontWeight: 700, color: "#64748b", minWidth: "22px", flexShrink: 0 }}>{portLabel}</span>
+                        {o.isUsed ? (
+                          <>
+                            {childNode || o.targetNode ? (
+                              <>
+                                <i className="bi bi-diagram-2-fill text-primary" style={{ flexShrink: 0 }} />
+                                <div 
+                                  onClick={() => togglePort(o.id)}
+                                  style={{ color: "#1d4ed8", fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer", display: "flex", alignItems: "center", gap: "4px", minWidth: 0 }}
+                                >
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{childNode?.name || o.targetNode?.name}</span>
+                                  <i className={`bi bi-chevron-${isPortExpanded ? "up" : "down"} text-muted`} style={{ fontSize: "0.65rem", flexShrink: 0 }} />
+                                </div>
+                                <span style={{
+                                  fontSize: "0.65rem", padding: "1px 6px", borderRadius: "10px",
+                                  background: "#eff6ff", color: "#1d4ed8", fontWeight: 600, flexShrink: 0
+                                }}>
+                                  {childNode?.type || o.targetNode?.type || "NODE"}
+                                </span>
+                              </>
+                            ) : ( o.client ? (
+                              <>
+                                <i className="bi bi-person-fill text-success" style={{ flexShrink: 0 }} />
+                                <span style={{ color: "#166534", fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                                  {o.client.username}
+                                </span>
+                                <span style={{
+                                  fontSize: "0.65rem", padding: "1px 5px", borderRadius: "10px",
+                                  background: o.client.isOnline ? "#dcfce7" : "#fee2e2",
+                                  color: o.client.isOnline ? "#15803d" : "#dc2626", fontWeight: 600, flexShrink: 0
+                                }}>
+                                  {o.client.isOnline ? "ON" : "OFF"}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <i className="bi bi-check-circle-fill text-success" style={{ flexShrink: 0 }} />
+                                <span style={{ color: "#166534", fontWeight: 500, flex: 1, minWidth: 0 }}>Terpakai</span>
+                              </>
+                            ))}
+                            <button
+                              title="Putuskan Jalur (Unassign)"
+                              onClick={() => onUnassignPort && onUnassignPort(o.id)}
+                              style={{ fontSize: "0.65rem", padding: "1px 6px", border: "1px solid #fca5a5", borderRadius: "8px", background: "#fff1f2", color: "#dc2626", cursor: "pointer", marginLeft: "auto", flexShrink: 0, display: "flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <i className="bi bi-x-circle" /> Putuskan
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <i className="bi bi-dash-circle text-secondary" />
+                            <span style={{ color: "#94a3b8", flex: 1 }}>Kosong</span>
+                            <button
+                              onClick={() => onAssignClient && onAssignClient(o.id)}
+                              style={{ fontSize: "0.65rem", padding: "1px 6px", border: "1px solid #93c5fd", borderRadius: "8px", background: "#eff6ff", color: "#1d4ed8", cursor: "pointer" }}
+                            >
+                              + Assign
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {isPortExpanded && (childNode ? (
+                        <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px" }}>
+                          {renderTree([childNode], depth + 1)}
+                        </div>
+                      ) : o.targetNode ? (
+                        <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px" }}>
+                          {renderTree([{ ...o.targetNode, children: [] }], depth + 1)}
+                        </div>
+                      ) : null)}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
 

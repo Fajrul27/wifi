@@ -141,6 +141,23 @@ class TopologyNodeService {
       });
     }
 
+    if (data.splitterType) {
+      const splitterService = require("./splitter.service");
+      const portsMap = {
+        SPLITTER_1_2: 2, SPLITTER_1_4: 4, SPLITTER_1_8: 8,
+        SPLITTER_1_16: 16, SPLITTER_1_32: 32, SPLITTER_1_64: 64
+      };
+      const outputPort = portsMap[data.splitterType] || 8;
+      const newSplitter = await splitterService.create({
+        nodeId: node.id,
+        type: data.splitterType,
+        outputPort,
+        name: `Splitter ${node.name}`,
+        description: `Splitter bawaan ${node.name}`
+      });
+      await splitterService.generateOutputs(newSplitter.id);
+    }
+
     return node;
   }
 
