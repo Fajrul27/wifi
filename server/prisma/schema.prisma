@@ -1,0 +1,310 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ======================================================
+// ROLE
+// ======================================================
+
+enum Role {
+  ADMIN
+  TEKNISI
+}
+
+// ======================================================
+// NODE TYPE
+// ======================================================
+
+enum NodeType {
+  ODC
+  ODP
+}
+
+// ======================================================
+// SPLITTER TYPE
+// ======================================================
+
+enum SplitterType {
+  SPLITTER_1_2
+  SPLITTER_1_4
+  SPLITTER_1_8
+  SPLITTER_1_16
+  SPLITTER_1_32
+  SPLITTER_1_64
+}
+
+// ======================================================
+// CABLE TYPE
+// ======================================================
+
+enum CableType {
+  DROP_1_CORE
+
+  BACKBONE_1_CORE
+  BACKBONE_2_CORE
+  BACKBONE_4_CORE
+  BACKBONE_6_CORE
+  BACKBONE_8_CORE
+  BACKBONE_12_CORE
+  BACKBONE_24_CORE
+  BACKBONE_48_CORE
+  BACKBONE_72_CORE
+  BACKBONE_96_CORE
+}
+
+// ======================================================
+// USER
+// ======================================================
+
+model User {
+  id         Int      @id @default(autoincrement())
+  username   String   @unique
+  email      String   @unique
+  password   String
+  role       Role     @default(ADMIN)
+  isVerified Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+// ======================================================
+// BLACKLIST TOKEN
+// ======================================================
+
+model BlacklistedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+}
+
+// ======================================================
+// ROUTER (OLT)
+// ======================================================
+
+model Router {
+  id        Int      @id @default(autoincrement())
+
+  name      String
+  host      String
+  username  String
+  password  String
+  port      Int      @default(8728)
+
+  latitude  Float?
+  longitude Float?
+
+  isOnline  Boolean  @default(false)
+  lastSeen  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  oltPorts  OltPort[]
+  pppoeUsers PppoeUser[]
+
+  @@index([isOnline])
+}
+
+// ======================================================
+// OLT PORT
+// ======================================================
+
+model OltPort {
+  id        Int      @id @default(autoincrement())
+
+  routerId  Int
+  name      String
+  port      String
+
+  latitude  Float?
+  longitude Float?
+
+  createdAt DateTime @default(now())
+
+  router Router @relation(fields: [routerId], references: [id], onDelete: Cascade)
+
+  nodes TopologyNode[]
+
+  @@unique([routerId, port])
+}
+
+// ======================================================
+// TOPOLOGY NODE (ODC / ODP)
+// ======================================================
+
+model TopologyNode {
+  id          Int      @id @default(autoincrement())
+
+  name        String
+  type        NodeType
+
+  oltPortId   Int?
+
+  latitude    Float?
+  longitude   Float?
+  description String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  oltPort OltPort? @relation(fields: [oltPortId], references: [id], onDelete: SetNull)
+
+  outgoingLinks TopologyLink[] @relation("FromNode")
+  incomingLinks TopologyLink[] @relation("ToNode")
+
+  splitters Splitter[]
+  clients PppoeUser[]
+
+  targetFiberCores FiberCore[]
+  targetSplitterOutputs SplitterOutput[]
+}
+
+// ======================================================
+// TOPOLOGY LINK
+// ======================================================
+
+model TopologyLink {
+  id            Int      @id @default(autoincrement())
+
+  fromNodeId    Int
+  toNodeId      Int
+
+  cableType     CableType
+  totalCore     Int
+  distanceMeter Float?
+  description   String?
+
+  createdAt     DateTime @default(now())
+
+  fromNode TopologyNode @relation("FromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode   TopologyNode @relation("ToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  cores FiberCore[]
+}
+
+// ======================================================
+// FIBER CORE
+// ======================================================
+
+model FiberCore {
+  id               Int      @id @default(autoincrement())
+
+  linkId           Int
+  coreNumber       Int
+
+  isUsed           Boolean  @default(false)
+
+  targetNodeId     Int?
+  splitterOutputId Int?
+
+  createdAt        DateTime @default(now())
+
+  link TopologyLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  targetNode TopologyNode? @relation(fields: [targetNodeId], references: [id], onDelete: SetNull)
+  splitterOutput SplitterOutput? @relation(fields: [splitterOutputId], references: [id], onDelete: SetNull)
+
+  @@unique([linkId, coreNumber])
+}
+
+// ======================================================
+// SPLITTER
+// ======================================================
+
+model Splitter {
+  id          Int           @id @default(autoincrement())
+
+  nodeId      Int
+  name        String?
+  type        SplitterType
+
+  inputPort   Int           @default(1)
+  outputPort   Int
+
+  description String?
+
+  createdAt   DateTime @default(now())
+
+  node TopologyNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  outputs SplitterOutput[]
+}
+
+// ======================================================
+// SPLITTER OUTPUT
+// ======================================================
+
+model SplitterOutput {
+  id           Int      @id @default(autoincrement())
+
+  splitterId   Int
+  portNumber   Int
+
+  isUsed       Boolean  @default(false)
+
+  targetNodeId Int?
+  clientId     Int?
+
+  createdAt    DateTime @default(now())
+
+  splitter Splitter @relation(fields: [splitterId], references: [id], onDelete: Cascade)
+
+  targetNode TopologyNode? @relation(fields: [targetNodeId], references: [id], onDelete: SetNull)
+
+  client PppoeUser? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  fiberCore FiberCore[]
+
+  @@unique([splitterId, portNumber])
+}
+
+// ======================================================
+// PPPOE CLIENT
+// ======================================================
+
+model PppoeUser {
+  id             Int      @id @default(autoincrement())
+
+  routerId       Int
+  username       String
+
+  topologyNodeId Int?
+
+  latitude       Float?
+  longitude      Float?
+
+  isOnline       Boolean  @default(false)
+
+  lastSeen       DateTime?
+  lastDisconnect DateTime?
+
+  localAddress   String?
+  remoteAddress  String?
+  profile        String?
+  keterangan     String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  router Router @relation(fields: [routerId], references: [id], onDelete: Cascade)
+
+  topologyNode TopologyNode? @relation(fields: [topologyNodeId], references: [id], onDelete: SetNull)
+
+  splitterOutputs SplitterOutput[]
+
+  @@unique([routerId, username])
+}
+
+model SpeedProfile {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  rateLimit   String   // format: "10M/10M" atau "10240k/10240k"
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
