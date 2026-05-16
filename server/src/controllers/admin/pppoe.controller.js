@@ -410,13 +410,27 @@ controller.updateUserFull = async (req, res) => {
           const params = [`=.id=${secret[".id"]}`];
           if (password) params.push(`=password=${password}`);
           if (profile) params.push(`=profile=${profile}`);
-          if (remoteAddress !== undefined) params.push(remoteAddress ? `=remote-address=${remoteAddress}` : `=remote-address=`);
-          if (localAddress !== undefined) params.push(localAddress ? `=local-address=${localAddress}` : `=local-address=`);
+          if (remoteAddress) params.push(`=remote-address=${remoteAddress}`);
+          if (localAddress) params.push(`=local-address=${localAddress}`);
           if (finalComment !== undefined) params.push(`=comment=${finalComment}`);
-          await service.client.write("/ppp/secret/set", params);
+          
+          if (params.length > 1) {
+            await service.client.write("/ppp/secret/set", params);
+          }
+
+          if (remoteAddress === "" || remoteAddress === null) {
+            try {
+              await service.client.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=remote-address`]);
+            } catch (unsetErr) { console.error("Unset remote-address error:", unsetErr.message); }
+          }
+          if (localAddress === "" || localAddress === null) {
+            try {
+              await service.client.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=local-address`]);
+            } catch (unsetErr) { console.error("Unset local-address error:", unsetErr.message); }
+          }
 
           // PENTING: Selalu hapus active session saat user diupdate dari web agar Mikrotik mengambil antrean (queue) paling fresh!
-          if (profile || remoteAddress || localAddress) {
+          if (profile || remoteAddress !== undefined || localAddress !== undefined) {
             const actives = await service.client.write("/ppp/active/print", [`?name=${user.username}`]);
             const active = actives?.[0];
             if (active) {
