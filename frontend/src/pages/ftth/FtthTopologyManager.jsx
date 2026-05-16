@@ -356,8 +356,8 @@ export default function FtthTopologyManager() {
       if (oltPortForm.id) res = await api.put(`/olt-ports/${oltPortForm.id}`, payload);
       else res = await api.post("/olt-ports", payload);
       if (res.data && res.data.success === false) throw new Error(res.data.message || "Gagal menyimpan OLT Port");
+      await loadData();
       closeModal();
-      loadData();
       showToast("OLT Port berhasil disimpan!", "success");
     } catch (err) {
       showToast("Gagal: " + (err.response?.data?.message || err.message), "danger");
@@ -392,8 +392,8 @@ export default function FtthTopologyManager() {
       if (res.data && res.data.success === false) {
         throw new Error(res.data.message || "Gagal menyimpan node");
       }
+      await loadData();
       closeModal();
-      loadData();
       showToast("Node berhasil disimpan!", "success");
     } catch (err) {
       const msg = err.response?.data?.message || err.message;
@@ -418,8 +418,8 @@ export default function FtthTopologyManager() {
       if (res.data && res.data.success === false) throw new Error(res.data.message || "Gagal menyimpan splitter");
       const splitterId = res.data?.data?.id;
       if (splitterId) await api.post(`/splitter/${splitterId}/generate`);
+      await loadData();
       closeModal();
-      loadData();
       showToast("Splitter berhasil disimpan!", "success");
     } catch (err) {
       showToast("Gagal: " + (err.response?.data?.message || err.message), "danger");
@@ -436,8 +436,8 @@ export default function FtthTopologyManager() {
       };
       const res = await api.put(`/splitter/output/${assignForm.outputId}/assign`, payload);
       if (res.data && res.data.success === false) throw new Error(res.data.message || "Gagal memasang pelanggan");
+      await loadData();
       closeModal();
-      loadData();
       showToast("Pelanggan berhasil dipasang ke port!", "success");
     } catch (err) {
       const msg = err.response?.data?.message || err.message;
@@ -520,8 +520,8 @@ export default function FtthTopologyManager() {
         latitude: parseFloat(userForm.latitude),
         longitude: parseFloat(userForm.longitude)
       });
+      await loadData();
       closeModal();
-      loadData();
       showToast("Lokasi pelanggan berhasil diperbarui!", "success");
     } catch (err) {
       showToast("Gagal update lokasi: " + (err.response?.data?.message || err.message), "danger");
@@ -553,7 +553,7 @@ export default function FtthTopologyManager() {
         port: iface.name,
       });
       setScanResults(prev => prev.filter(p => p.name !== iface.name));
-      loadData();
+      await loadData();
       showToast(`Port ${iface.name} berhasil ditambahkan!`, "success");
     } catch (err) {
       showToast("Gagal menambah port: " + (err.response?.data?.message || err.message), "danger");
@@ -573,7 +573,7 @@ export default function FtthTopologyManager() {
 
       setDeleteId(null);
       setDeleteType(null);
-      loadData();
+      await loadData();
       showToast("Item berhasil dihapus!", "success");
     } catch (err) {
       showToast("Gagal menghapus: " + (err.response?.data?.message || err.message), "danger");
