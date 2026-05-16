@@ -392,6 +392,11 @@ export default function FtthTopologyManager() {
       if (res.data && res.data.success === false) {
         throw new Error(res.data.message || "Gagal menyimpan node");
       }
+      if (!nodeForm.id && nodeForm.splitterOutputId && res.data?.data?.id) {
+        await api.put(`/splitter/output/${nodeForm.splitterOutputId}/assign`, {
+          targetNodeId: Number(res.data.data.id)
+        });
+      }
       await loadData();
       closeModal();
       showToast("Node berhasil disimpan!", "success");

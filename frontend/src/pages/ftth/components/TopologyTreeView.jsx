@@ -182,8 +182,8 @@ function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssi
                       {renderTree([childNode], depth + 1)}
                     </div>
                   ) : o.targetNode ? (
-                    <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px", fontSize: "0.75rem", color: "#64748b" }}>
-                      <i className="bi bi-info-circle me-1" /> Node [{o.targetNode.type}] {o.targetNode.name} terhubung ke port ini.
+                    <div style={{ marginTop: "6px", paddingTop: "8px", borderTop: "1px dashed #cbd5e1", paddingLeft: "12px" }}>
+                      {renderTree([{ ...o.targetNode, children: [] }], depth + 1)}
                     </div>
                   ) : null)}
                 </div>
@@ -374,9 +374,19 @@ export default function TopologyTreeView({
 
     const roots = [];
     nodes.forEach(n => {
+      let parentNodeId = null;
       const parentLink = (n.incomingLinks || [])[0];
-      if (parentLink && byId[parentLink.fromNodeId]) {
-        byId[parentLink.fromNodeId].children.push(byId[n.id]);
+      if (parentLink) {
+        parentNodeId = parentLink.fromNodeId;
+      } else {
+        for (const s of splitters) {
+          const foundOut = (s.outputs || []).find(o => Number(o.targetNodeId) === Number(n.id));
+          if (foundOut) { parentNodeId = s.nodeId; break; }
+        }
+      }
+
+      if (parentNodeId && byId[parentNodeId]) {
+        byId[parentNodeId].children.push(byId[n.id]);
       } else {
         roots.push(byId[n.id]);
       }
