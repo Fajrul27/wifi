@@ -924,20 +924,14 @@ export default function FtthTopologyManager() {
                         <div className="col-md-6">
                           <label className="form-label small fw-bold text-secondary mb-1">Tipe Node *</label>
                           <select 
-                            className={`form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none ${(!nodeForm.id && modalData?.type) ? 'bg-light' : ''}`} 
+                            className="form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none" 
                             required 
                             value={nodeForm.type} 
-                            disabled={!nodeForm.id && !!modalData?.type}
                             onChange={(e) => setNodeForm({ ...nodeForm, type: e.target.value })}
                           >
                             <option value="ODC">ODC (Optical Distribution Cabinet)</option>
                             <option value="ODP">ODP (Optical Distribution Point)</option>
                           </select>
-                          {!nodeForm.id && !!modalData?.type && (
-                            <small className="text-success mt-1 d-flex align-items-center gap-1 fw-medium">
-                              <i className="bi bi-lock-fill"></i> Terkunci otomatis ke tipe {nodeForm.type === 'ODC' && modalData?.parentNodeId ? 'Sub-ODC' : nodeForm.type}
-                            </small>
-                          )}
                         </div>
                       </div>
 
