@@ -254,13 +254,13 @@ controller.getInterfaceStats = async (req, res) => {
 
     await service.connect();
 
-    const interfaces = await service.client.write("/interface/print");
+    const interfaces = await service.write("/interface/print");
 
     const result = [];
 
     for (const i of interfaces || []) {
       try {
-        const t = await service.client.write(
+        const t = await service.write(
           "/interface/monitor-traffic",
           [`=interface=${i.name}`, "=once"]
         );
@@ -314,7 +314,7 @@ controller.getProfiles = async (req, res) => {
     const connected = await service.connect();
     if (!connected) throw new Error("Tidak dapat terhubung ke Mikrotik");
 
-    const profiles = await service.client.write("/ppp/profile/print");
+    const profiles = await service.write("/ppp/profile/print");
 
     const result = (profiles || []).map(p => ({
       name: p.name,
@@ -353,7 +353,7 @@ async function ensureProfileExists(service, profileName, customRateLimit = null)
 
     const finalRate = customRateLimit || (dbProfile ? dbProfile.rateLimit : null);
 
-    const profiles = await service.client.write("/ppp/profile/print", [`?name=${profileName}`]);
+    const profiles = await service.write("/ppp/profile/print", [`?name=${profileName}`]);
     if (profiles && profiles.length > 0) {
       const existingProfile = profiles[0];
       const currentRate = existingProfile["rate-limit"] || "";
@@ -361,7 +361,7 @@ async function ensureProfileExists(service, profileName, customRateLimit = null)
       
       // Jika rate-limit di Mikrotik berbeda dengan target kita, UPDATE di Mikrotik!
       if (currentRate !== targetRate) {
-        await service.client.write("/ppp/profile/set", [
+        await service.write("/ppp/profile/set", [
           `=.id=${existingProfile[".id"]}`,
           `=rate-limit=${targetRate}`
         ]);
@@ -376,7 +376,7 @@ async function ensureProfileExists(service, profileName, customRateLimit = null)
     }
     
     // Create di Mikrotik
-    await service.client.write("/ppp/profile/add", params);
+    await service.write("/ppp/profile/add", params);
   } catch (err) {
     console.error(`Gagal membuat profil ${profileName} di Mikrotik/DB:`, err.message);
   }
@@ -404,7 +404,7 @@ controller.updateUserFull = async (req, res) => {
       if (connected) {
         if (profile) await ensureProfileExists(service, profile, rateLimit); // PASTIKAN PROFIL ADA DI MIKROTIK & DB
         
-        const secrets = await service.client.write("/ppp/secret/print", [`?name=${user.username}`]);
+        const secrets = await service.write("/ppp/secret/print", [`?name=${user.username}`]);
         const secret = secrets?.[0];
         if (secret) {
           const params = [`=.id=${secret[".id"]}`];
@@ -415,26 +415,26 @@ controller.updateUserFull = async (req, res) => {
           if (finalComment !== undefined) params.push(`=comment=${finalComment}`);
           
           if (params.length > 1) {
-            await service.client.write("/ppp/secret/set", params);
+            await service.write("/ppp/secret/set", params);
           }
 
           if (remoteAddress === "" || remoteAddress === null) {
             try {
-              await service.client.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=remote-address`]);
+              await service.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=remote-address`]);
             } catch (unsetErr) { console.error("Unset remote-address error:", unsetErr.message); }
           }
           if (localAddress === "" || localAddress === null) {
             try {
-              await service.client.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=local-address`]);
+              await service.write("/ppp/secret/unset", [`=.id=${secret[".id"]}`, `=value-name=local-address`]);
             } catch (unsetErr) { console.error("Unset local-address error:", unsetErr.message); }
           }
 
           // PENTING: Selalu hapus active session saat user diupdate dari web agar Mikrotik mengambil antrean (queue) paling fresh!
           if (profile || remoteAddress !== undefined || localAddress !== undefined) {
-            const actives = await service.client.write("/ppp/active/print", [`?name=${user.username}`]);
+            const actives = await service.write("/ppp/active/print", [`?name=${user.username}`]);
             const active = actives?.[0];
             if (active) {
-              await service.client.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
+              await service.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
               console.log(`[Mikrotik] Active session ${user.username} diputus untuk apply speed/IP fresh.`);
             }
           }
@@ -480,7 +480,7 @@ controller.createUser = async (req, res) => {
     // Buat di Mikrotik
     if (profile) await ensureProfileExists(service, profile, rateLimit); // PASTIKAN PROFIL ADA DI MIKROTIK & DB
     
-    await service.client.write("/ppp/secret/add", [
+    await service.write("/ppp/secret/add", [
       `=name=${username}`,
       `=password=${password}`,
       `=service=pppoe`,
@@ -526,7 +526,7 @@ controller.updateUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: "User tidak ditemukan" });
 
     // Cari .id Mikrotik berdasarkan username
-    const secrets = await service.client.write("/ppp/secret/print", [
+    const secrets = await service.write("/ppp/secret/print", [
       `?name=${user.username}`,
     ]);
     const secret = secrets?.[0];
@@ -537,7 +537,17 @@ controller.updateUser = async (req, res) => {
     if (password) params.push(`=password=${password}`);
     if (profile) params.push(`=profile=${profile}`);
     if (comment !== undefined) params.push(`=comment=${comment}`);
-    await service.client.write("/ppp/secret/set", params);
+    await service.write("/ppp/secret/set", params);
+
+    // Hapus active session jika profile berubah agar Mikrotik mengambil antrean (queue) paling fresh!
+    if (profile) {
+      const actives = await service.write("/ppp/active/print", [`?name=${user.username}`]);
+      const active = actives?.[0];
+      if (active) {
+        await service.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
+        console.log(`[Mikrotik] Active session ${user.username} diputus untuk apply speed fresh.`);
+      }
+    }
 
     // Update di DB
     const updated = await prisma.pppoeUser.update({
@@ -565,14 +575,14 @@ controller.deleteUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: "User tidak ditemukan" });
 
     // Cari .id Mikrotik
-    const secrets = await service.client.write("/ppp/secret/print", [
+    const secrets = await service.write("/ppp/secret/print", [
       `?name=${user.username}`,
     ]);
     const secret = secrets?.[0];
 
     // Hapus dari Mikrotik jika ada
     if (secret) {
-      await service.client.write("/ppp/secret/remove", [`=.id=${secret[".id"]}`]);
+      await service.write("/ppp/secret/remove", [`=.id=${secret[".id"]}`]);
     }
 
     // Hapus dari DB
@@ -598,7 +608,7 @@ controller.kickUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: "User tidak ditemukan" });
 
     // Cari sesi aktif di Mikrotik
-    const actives = await service.client.write("/ppp/active/print", [
+    const actives = await service.write("/ppp/active/print", [
       `?name=${user.username}`,
     ]);
     const active = actives?.[0];
@@ -607,7 +617,7 @@ controller.kickUser = async (req, res) => {
       return res.status(400).json({ success: false, message: "User tidak sedang online" });
     }
 
-    await service.client.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
+    await service.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
 
     res.json({ success: true, message: `Sesi ${user.username} berhasil diputus` });
   } catch (err) {

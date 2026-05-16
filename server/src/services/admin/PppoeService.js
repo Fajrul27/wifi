@@ -219,6 +219,28 @@ class PppoeService {
   }
 
   /* =========================
+     WRITE SAFE (MUTEX + TIMEOUT)
+  ========================= */
+  async write(path, params = []) {
+    while (this.isWriting) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    this.isWriting = true;
+    try {
+      const connected = await this.connect();
+      if (!connected) throw new Error("Tidak dapat terhubung ke Mikrotik");
+
+      const res = await Promise.race([
+        this.client.write(path, params),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Mikrotik write timeout")), 15000))
+      ]);
+      return res;
+    } finally {
+      this.isWriting = false;
+    }
+  }
+
+  /* =========================
      SYNC USERS (dari Mikrotik ke DB)
   ========================= */
   async syncUsers() {
@@ -231,7 +253,7 @@ class PppoeService {
     // ==========================================
     // 1. SYNC PROFIL KECEPATAN (SPEED PROFILES)
     // ==========================================
-    const mtProfiles = await this.client.write("/ppp/profile/print");
+    const mtProfiles = await this.write("/ppp/profile/print");
     const mtProfileMap = new Map((mtProfiles || []).map(p => [p.name, p]));
     const dbProfiles = await prisma.speedProfile.findMany();
     const dbProfileMap = new Map(dbProfiles.map(p => [p.name, p]));
@@ -243,10 +265,10 @@ class PppoeService {
       if (!mtP) {
         const params = [`=name=${dbP.name}`];
         if (targetRate) params.push(`=rate-limit=${targetRate}`);
-        await this.client.write("/ppp/profile/add", params);
+        await this.write("/ppp/profile/add", params);
         createdProfiles++;
       } else if ((mtP["rate-limit"] || "") !== targetRate) {
-        await this.client.write("/ppp/profile/set", [
+        await this.write("/ppp/profile/set", [
           `=.id=${mtP[".id"]}`,
           `=rate-limit=${targetRate}`
         ]);
@@ -273,7 +295,7 @@ class PppoeService {
     // ==========================================
     // 2. SYNC USER PPPoE (SECRETS)
     // ==========================================
-    const secrets = await this.client.write("/ppp/secret/print");
+    const secrets = await this.write("/ppp/secret/print");
     const secretMap = new Map((secrets || []).map(s => [s.name, s]));
     const dbUsers = await prisma.pppoeUser.findMany({ where: { routerId: this.router.id } });
     const dbUserMap = new Map(dbUsers.map(u => [u.username, u]));
@@ -308,7 +330,7 @@ class PppoeService {
     // B. Dari DB ke Mikrotik (Push user DB yang belum ada di Mikrotik secret)
     for (const u of dbUsers) {
       if (!secretMap.has(u.username)) {
-        await this.client.write("/ppp/secret/add", [
+        await this.write("/ppp/secret/add", [
           `=name=${u.username}`,
           `=password=12345678`, // Default password jika hilang dari mikrotik
           `=service=pppoe`,
@@ -343,7 +365,7 @@ class PppoeService {
     const connected = await this.connect();
     if (!connected) return this.cacheActive; // Kembalikan cache terakhir
 
-    const data = await this.client.write("/ppp/active/print");
+    const data = await this.write("/ppp/active/print");
     this.cacheActive = data || [];
     this.cacheTime = now;
     return this.cacheActive;
@@ -354,7 +376,7 @@ class PppoeService {
   ========================= */
   async getInterfaceTraffic(interfaceName) {
     try {
-      const t = await this.client.write(
+      const t = await this.write(
         "/interface/monitor-traffic",
         [`=interface=${interfaceName}`, "=once"]
       );
