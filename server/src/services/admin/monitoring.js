@@ -42,21 +42,10 @@ async function startRouterWorker(router) {
   const loop = async () => {
     while (running) {
       try {
-        // ─── Koneksi monitoring untuk data sistem (CPU, RAM, Traffic) ───
-        const client = new RouterOSAPI({
-          host: router.host,
-          user: router.username,
-          password: decrypt(router.password),
-          port: router.port || 8728,
-          timeout: 15000,
-        });
-
-        await client.connect();
-
-        // Ambil data sistem router
+        // Gunakan pppoeService.write agar tidak membuat koneksi baru dan tidak memicu API reset di Mikrotik
         let system = null;
         try {
-          const res = await client.write("/system/resource/print");
+          const res = await pppoeService.write("/system/resource/print");
           const d = res?.[0] || {};
           system = {
             cpuLoad: Number(d["cpu-load"] || 0),
@@ -68,10 +57,9 @@ async function startRouterWorker(router) {
           };
         } catch { }
 
-        // Ambil data traffic interface
         let traffic = { rxBps: 0, txBps: 0 };
         try {
-          const res = await client.write("/interface/monitor-traffic", [
+          const res = await pppoeService.write("/interface/monitor-traffic", [
             `=interface=${router.interface || "ether1"}`,
             "=once",
           ]);
@@ -81,9 +69,6 @@ async function startRouterWorker(router) {
             txBps: Number(d["tx-bits-per-second"] || 0),
           };
         } catch { }
-
-        // Tutup koneksi monitoring (biarkan PppoeService yang kelola koneksinya sendiri)
-        try { await client.close(); } catch { }
 
         const realtime = {
           routerId: router.id,

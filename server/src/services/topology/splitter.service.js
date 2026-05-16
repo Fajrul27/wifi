@@ -191,17 +191,17 @@ class SplitterService {
       try {
         const router = await prisma.router.findUnique({ where: { id: user.routerId } });
         if (router) {
-          const PppoeService = require("../admin/PppoeService");
-          const pppoeService = new PppoeService(router);
+          const monitoring = require("../admin/monitoring");
+          const pppoeService = monitoring.getPppoeService(router);
           await pppoeService.connect();
           
           // Cari .id di Mikrotik berdasarkan username
-          const secrets = await pppoeService.client.write("/ppp/secret/print", [
+          const secrets = await pppoeService.write("/ppp/secret/print", [
             `?name=${user.username}`
           ]);
           
           if (secrets && secrets.length > 0) {
-            await pppoeService.client.write("/ppp/secret/set", [
+            await pppoeService.write("/ppp/secret/set", [
               `=.id=${secrets[0][".id"]}`,
               "=disabled=yes"
             ]);

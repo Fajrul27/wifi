@@ -34,11 +34,11 @@ async function syncProfileToRouters(profileName, rateLimit) {
         const targetRate = rateLimit && rateLimit !== "LOSS" ? rateLimit : "";
 
         // 1. Cek & update profile di Mikrotik
-        const profiles = await service.client.write("/ppp/profile/print", [`?name=${profileName}`]);
+        const profiles = await service.write("/ppp/profile/print", [`?name=${profileName}`]);
         if (profiles && profiles.length > 0) {
           const existingProfile = profiles[0];
           if ((existingProfile["rate-limit"] || "") !== targetRate) {
-            await service.client.write("/ppp/profile/set", [
+            await service.write("/ppp/profile/set", [
               `=.id=${existingProfile[".id"]}`,
               `=rate-limit=${targetRate}`
             ]);
@@ -47,12 +47,12 @@ async function syncProfileToRouters(profileName, rateLimit) {
         } else {
           const params = [`=name=${profileName}`];
           if (targetRate) params.push(`=rate-limit=${targetRate}`);
-          await service.client.write("/ppp/profile/add", params);
+          await service.write("/ppp/profile/add", params);
           console.log(`[Mikrotik][${router.host}] Profil ${profileName} dibuat dengan rate-limit ${targetRate || "LOSS"}`);
         }
 
         // 2. Putuskan active session yang menggunakan profile ini agar langsung reconnect dengan speed baru!
-        const actives = await service.client.write("/ppp/active/print");
+        const actives = await service.write("/ppp/active/print");
         const usersWithProfile = await prisma.pppoeUser.findMany({
           where: { routerId: router.id, profile: profileName },
           select: { username: true }
@@ -61,7 +61,7 @@ async function syncProfileToRouters(profileName, rateLimit) {
 
         for (const act of actives || []) {
           if (usernames.has(act.name)) {
-            await service.client.write("/ppp/active/remove", [`=.id=${act[".id"]}`]);
+            await service.write("/ppp/active/remove", [`=.id=${act[".id"]}`]);
             console.log(`[Mikrotik][${router.host}] Active session ${act.name} diputus untuk apply speed baru.`);
           }
         }
