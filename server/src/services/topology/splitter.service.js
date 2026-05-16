@@ -227,6 +227,29 @@ class SplitterService {
   }
 
   // =====================================================
+  // UPDATE SPLITTER
+  // =====================================================
+  async update(splitterId, data) {
+    const id = Number(splitterId);
+    const existing = await prisma.splitter.findUnique({
+      where: { id }
+    });
+    if (!existing) throw new Error("Splitter tidak ditemukan");
+
+    return await prisma.splitter.update({
+      where: { id },
+      data: {
+        name: data.name ?? null,
+        description: data.description ?? null,
+      },
+      include: {
+        node: true,
+        outputs: true,
+      }
+    });
+  }
+
+  // =====================================================
   // DELETE SPLITTER
   // =====================================================
   async remove(splitterId) {

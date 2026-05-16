@@ -21,6 +21,9 @@ router.put("/output/:id/unassign", controller.unassignOutput);
 router.get("/output/client/:clientId", controller.findByClient);
 router.post("/user/:clientId/force-reset", controller.forceResetUser);
 
+// UPDATE SPLITTER
+router.put("/:id", controller.update);
+
 // DELETE SPLITTER
 router.delete("/:id", controller.remove);
 

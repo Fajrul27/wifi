@@ -185,6 +185,19 @@ exports.forceResetUser = async (req, res) => {
 };
 
 // =====================================================
+// UPDATE SPLITTER
+// =====================================================
+exports.update = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await splitterService.update(id, req.body);
+    return response(res, true, "Splitter berhasil diupdate", result);
+  } catch (err) {
+    return response(res, false, err.message);
+  }
+};
+
+// =====================================================
 // DELETE SPLITTER
 // =====================================================
 exports.remove = async (req, res) => {

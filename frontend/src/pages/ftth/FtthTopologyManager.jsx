@@ -70,7 +70,7 @@ export default function FtthTopologyManager() {
     totalCore: 12, distanceMeter: ""
   });
   const [splitterForm, setSplitterForm] = useState({
-    nodeId: "", type: "SPLITTER_1_8", outputPort: 8, name: "", description: ""
+    id: null, nodeId: "", type: "SPLITTER_1_8", outputPort: 8, name: "", description: ""
   });
   const [assignForm, setAssignForm] = useState({ 
     outputId: "", clientId: "", targetNodeId: "" 
@@ -292,6 +292,7 @@ export default function FtthTopologyManager() {
     }
     if (type === 'splitter') {
       setSplitterForm({
+        id: data?.id || null,
         nodeId: data?.nodeId || '', type: data?.type || 'SPLITTER_1_8',
         outputPort: data?.outputPort || 8, name: data?.name || '', description: data?.description || '',
       });
@@ -807,6 +808,8 @@ export default function FtthTopologyManager() {
               onDelete={(id) => { setDeleteId(id); setDeleteType('node'); }}
               onAddChild={(parentId, type) => openModal('node', { type, parentNodeId: parentId })}
               onAddSplitter={(nodeId) => openModal('splitter', { nodeId })}
+              onEditSplitter={(splitter) => openModal('splitter', splitter)}
+              onDeleteSplitter={(id) => { setDeleteId(id); setDeleteType('splitter'); }}
               onAssignClient={(id) => {
                 const isOutput = splitters.some(s => (s.outputs || []).some(o => Number(o.id) === Number(id)));
                 if (isOutput) {
@@ -1088,6 +1091,7 @@ export default function FtthTopologyManager() {
                         <select
                           className="form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none"
                           required
+                          disabled={!!splitterForm.id}
                           value={splitterForm.nodeId}
                           onChange={(e) => setSplitterForm({ ...splitterForm, nodeId: e.target.value })}
                         >
@@ -1099,13 +1103,13 @@ export default function FtthTopologyManager() {
                       </div>
                       <div className="mb-4">
                         <label className="form-label small fw-bold text-secondary mb-1">Tipe Rasio Splitter *</label>
-                        <select className="form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none" required value={splitterForm.type} onChange={(e) => { const type = e.target.value; const ports = SPLITTER_TYPES[type] || 8; setSplitterForm({ ...splitterForm, type, outputPort: ports }); }}>
+                        <select className="form-select form-select-lg rounded-3 border-secondary-subtle fs-6 shadow-none" required disabled={!!splitterForm.id} value={splitterForm.type} onChange={(e) => { const type = e.target.value; const ports = SPLITTER_TYPES[type] || 8; setSplitterForm({ ...splitterForm, type, outputPort: ports }); }}>
                           {Object.entries(SPLITTER_TYPES).filter(([k]) => k !== 'NONE').map(([key, val]) => (<option key={key} value={key}>{getSplitterLabel(key)} ({val} port output)</option>))}
                         </select>
                       </div>
                       <div className="mb-4">
                         <label className="form-label small fw-bold text-secondary mb-1">Jumlah Port Output</label>
-                        <input type="number" className="form-control form-control-lg rounded-3 border-secondary-subtle fs-6 shadow-none" min="1" max="64" value={splitterForm.outputPort} onChange={(e) => setSplitterForm({ ...splitterForm, outputPort: Number(e.target.value) })} />
+                        <input type="number" className="form-control form-control-lg rounded-3 border-secondary-subtle fs-6 shadow-none" min="1" max="64" disabled={!!splitterForm.id} value={splitterForm.outputPort} onChange={(e) => setSplitterForm({ ...splitterForm, outputPort: Number(e.target.value) })} />
                         <small className="text-muted mt-1 d-block"><i className="bi bi-info-circle me-1"></i> Jumlah port output fiber yang akan dibuat secara otomatis</small>
                       </div>
                       <div className="mb-4">

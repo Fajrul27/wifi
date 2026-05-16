@@ -72,7 +72,7 @@ function PortBar({ used, total }) {
 // ─────────────────────────────────────────────────
 // SPLITTER DETAIL (row per port)
 // ─────────────────────────────────────────────────
-function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssign, onUnassign }) {
+function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssign, onUnassign, onEditSplitter, onDeleteSplitter }) {
   const [open, setOpen] = useState(false);
   const [expandedPorts, setExpandedPorts] = useState({});
 
@@ -85,7 +85,7 @@ function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssi
 
   return (
     <div style={{ marginTop: "6px", border: "1px dashed #cbd5e1", borderRadius: "8px", overflow: "hidden" }}>
-      <button
+      <div
         onClick={() => setOpen(v => !v)}
         style={{
           width: "100%", display: "flex", alignItems: "center", gap: "8px",
@@ -97,8 +97,21 @@ function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssi
         <span style={{ fontWeight: 600 }}>{splitter.name || `Splitter #${splitter.id}`}</span>
         <span style={{ fontSize: "0.72rem", color: "#64748b" }}>({splitter.type?.replace("SPLITTER_", "").replace("_", ":")}) </span>
         <PortBar used={usedCount} total={outputs.length} />
-        <i className={`bi bi-chevron-${open ? "up" : "down"} ms-auto`} style={{ fontSize: "0.7rem" }} />
-      </button>
+
+        <div style={{ display: "flex", gap: "4px", marginLeft: "auto" }} onClick={e => e.stopPropagation()}>
+          <button title="Edit Splitter" onClick={() => onEditSplitter && onEditSplitter(splitter)}
+            style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #d1d5db", borderRadius: "6px", background: "#f9fafb", color: "#374151", cursor: "pointer" }}>
+            <i className="bi bi-pencil" />
+          </button>
+          <button title="Hapus Splitter" onClick={() => onDeleteSplitter && onDeleteSplitter(splitter.id)}
+            style={{ fontSize: "0.7rem", padding: "2px 7px", border: "1px solid #fca5a5", borderRadius: "6px", background: "#fff1f2", color: "#dc2626", cursor: "pointer" }}>
+            <i className="bi bi-trash" />
+          </button>
+          <button style={{ background: "none", border: "none", padding: "2px 4px", cursor: "pointer", color: "#64748b" }} onClick={() => setOpen(v => !v)}>
+            <i className={`bi bi-chevron-${open ? "up" : "down"}`} style={{ fontSize: "0.7rem" }} />
+          </button>
+        </div>
+      </div>
 
       {open && (
         <div style={{ padding: "8px 12px", background: "#fff" }}>
@@ -199,7 +212,7 @@ function SplitterDetail({ splitter, nodeChildren = [], renderTree, depth, onAssi
 // ─────────────────────────────────────────────────
 // NODE CARD (ODC / ODP)
 // ─────────────────────────────────────────────────
-function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, onAddChild, onAddSplitter, onAssignClient, onUnassignPort, isLastChild, renderTree }) {
+function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, onAddChild, onAddSplitter, onAssignClient, onUnassignPort, onEditSplitter, onDeleteSplitter, isLastChild, renderTree }) {
   const [collapsed, setCollapsed] = useState(false);
   const { status, reason, onlineClients, totalClients } = calcNodeStatus(node, splitters, realtimeTopology);
   const cfg = statusConfig(status);
@@ -323,7 +336,7 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
         {!collapsed && nodeSplitters.length > 0 && (
           <div style={{ padding: "0 14px 10px" }}>
             {nodeSplitters.map(s => (
-              <SplitterDetail key={s.id} splitter={s} nodeChildren={node.children || []} renderTree={renderTree} depth={depth} onAssign={onAssignClient} onUnassign={onUnassignPort} />
+              <SplitterDetail key={s.id} splitter={s} nodeChildren={node.children || []} renderTree={renderTree} depth={depth} onAssign={onAssignClient} onUnassign={onUnassignPort} onEditSplitter={onEditSplitter} onDeleteSplitter={onDeleteSplitter} />
             ))}
           </div>
         )}
@@ -359,7 +372,7 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
 // ─────────────────────────────────────────────────
 export default function TopologyTreeView({
   nodes, splitters, oltPorts, realtimeTopology = [],
-  onEdit, onDelete, onAddChild, onAddSplitter, onAssignClient, onUnassignPort
+  onEdit, onDelete, onAddChild, onAddSplitter, onAssignClient, onUnassignPort, onEditSplitter, onDeleteSplitter
 }) {
   const [socketStatus, setSocketStatus] = useState(realtimeTopology);
 
@@ -410,6 +423,8 @@ export default function TopologyTreeView({
         onAddSplitter={onAddSplitter}
         onAssignClient={onAssignClient}
         onUnassignPort={onUnassignPort}
+        onEditSplitter={onEditSplitter}
+        onDeleteSplitter={onDeleteSplitter}
         renderTree={renderTree}
       />
     ));
