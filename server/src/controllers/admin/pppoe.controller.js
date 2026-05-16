@@ -50,7 +50,7 @@ const normalizeKey = (name = "") =>
 // =========================
 let _monitoring = null;
 const getMonitoring = () => {
-  if (!_monitoring) _monitoring = require("../services/admin/monitoring");
+  if (!_monitoring) _monitoring = require("../../services/admin/monitoring");
   return _monitoring;
 };
 
