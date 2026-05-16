@@ -1164,7 +1164,7 @@ export default function FtthTopologyManager() {
 
                     return (
                       <>
-                        {isOdcSplitter ? (
+                        {isOdcSplitter && !modalData?.clientId ? (
                           <div className="mb-4">
                             <label className="form-label small fw-bold text-secondary mb-2">Tipe Pemasangan Port (ODC Splitter) *</label>
                             <div className="d-flex gap-2 p-1 bg-light rounded-3 border border-secondary-subtle">
@@ -1183,6 +1183,11 @@ export default function FtthTopologyManager() {
                                 <i className="bi bi-diagram-2 me-2"></i>Ke Node Lanjutan (ODC/ODP)
                               </button>
                             </div>
+                          </div>
+                        ) : modalData?.clientId ? (
+                          <div className="alert alert-info border border-info-subtle bg-info bg-opacity-10 rounded-4 p-3 small mb-4 shadow-sm d-flex align-items-center gap-2">
+                            <i className="bi bi-person-check-fill text-info fs-5"></i>
+                            <div><strong>Pemasangan Pelanggan:</strong> Mode pemasangan dikunci untuk menghubungkan port fiber langsung ke akun PPPoE Pelanggan ini.</div>
                           </div>
                         ) : (
                           <div className="alert alert-warning border border-warning-subtle bg-warning bg-opacity-10 rounded-4 p-3 small mb-4 shadow-sm d-flex align-items-center gap-2">
