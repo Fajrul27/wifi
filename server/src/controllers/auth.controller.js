@@ -63,7 +63,6 @@ class AuthController {
   ========================= */
   static async me(req, res) {
     try {
-      // ambil dari DB biar selalu up-to-date
       const user = await AuthService.getProfile(req.user.userId);
 
       return res.json({
@@ -73,6 +72,35 @@ class AuthController {
 
     } catch (err) {
       return res.status(404).json({
+        success: false,
+        message: err.message,
+      });
+    }
+  }
+
+  /* =========================
+     UPDATE ME (PROFILE)
+  ========================= */
+  static async updateMe(req, res) {
+    try {
+      const { username, email, password } = req.body;
+      const result = await AuthService.updateProfile(req.user.userId, { username, email, password });
+
+      res.cookie("token", result.token, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+
+      return res.json({
+        success: true,
+        message: "Profil berhasil diperbarui",
+        user: result.user,
+      });
+
+    } catch (err) {
+      return res.status(400).json({
         success: false,
         message: err.message,
       });

@@ -63,6 +63,31 @@ class FiberAssignmentService {
 
     ]);
 
+    if (client && client.routerId) {
+      try {
+        const router = await prisma.router.findUnique({ where: { id: client.routerId } });
+        if (router) {
+          const monitoring = require("../admin/monitoring");
+          const pppoeService = monitoring.getPppoeService(router);
+          await pppoeService.connect();
+          
+          // Cari & Enable di /ppp/secret
+          const secrets = await pppoeService.write("/ppp/secret/print", [
+            `?name=${client.username}`
+          ]);
+          if (secrets && secrets.length > 0) {
+            await pppoeService.write("/ppp/secret/set", [
+              `=.id=${secrets[0][".id"]}`,
+              "=disabled=no"
+            ]);
+            console.log(`[Provisioning] Enabled PPPoE user secret: ${client.username}`);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal enable Mikrotik saat pasang di fiberAssignment:", err.message);
+      }
+    }
+
     return {
       success: true,
       message: "Client berhasil di-assign ke fiber",
@@ -103,6 +128,32 @@ class FiberAssignmentService {
       }),
 
     ]);
+
+    const user = await prisma.pppoeUser.findUnique({ where: { id: clientId } });
+    if (user && user.routerId) {
+      try {
+        const router = await prisma.router.findUnique({ where: { id: user.routerId } });
+        if (router) {
+          const monitoring = require("../admin/monitoring");
+          const pppoeService = monitoring.getPppoeService(router);
+          await pppoeService.connect();
+          
+          // Cari & Pastikan Enable di /ppp/secret
+          const secrets = await pppoeService.write("/ppp/secret/print", [
+            `?name=${user.username}`
+          ]);
+          if (secrets && secrets.length > 0) {
+            await pppoeService.write("/ppp/secret/set", [
+              `=.id=${secrets[0][".id"]}`,
+              "=disabled=no"
+            ]);
+            console.log(`[Provisioning] Maintained PPPoE user secret active (Option B): ${user.username}`);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal maintain Mikrotik (Option B) di fiberAssignment:", err.message);
+      }
+    }
 
     return {
       success: true,

@@ -1,5 +1,5 @@
 // components/NocPppoeMap.jsx
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -669,12 +669,17 @@ const createUserIcon = (isOnline) =>
 // =========================
 function MapAutoFocus({ target, zoom = 14 }) {
   const map = useMap();
+  const prevTargetIdRef = useRef(null);
   useEffect(() => {
     if (target?.latitude && target?.longitude) {
-      map.flyTo([target.latitude, target.longitude], zoom, {
-        duration: 1.2,
-        animate: true,
-      });
+      const targetKey = target.id || target.username || target.name;
+      if (prevTargetIdRef.current !== targetKey) {
+        map.flyTo([target.latitude, target.longitude], zoom, {
+          duration: 1.2,
+          animate: true,
+        });
+        prevTargetIdRef.current = targetKey;
+      }
     }
   }, [target, zoom, map]);
   return null;
@@ -808,6 +813,7 @@ export default function NocPppoeMap() {
   };
 
   // Initial load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadRouters(); }, []);
 
   // Load when router changes

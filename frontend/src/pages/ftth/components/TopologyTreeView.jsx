@@ -82,7 +82,6 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
   const cfg = statusConfig(status);
   const nodeSplitters = splitters.filter(s => Number(s.nodeId) === Number(node.id));
   const totalPorts = nodeSplitters.reduce((a, s) => a + (s.outputs || []).length, 0);
-  const usedPorts = nodeSplitters.reduce((a, s) => a + (s.outputs || []).filter(o => o.isUsed).length, 0);
 
   const isODC = node.type === "ODC";
   const typeColor = isODC ? "#3b82f6" : "#f59e0b";
@@ -97,6 +96,17 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
   });
 
   const unassignedChildren = (node.children || []).filter(cn => !assignedChildNodeIds.has(Number(cn.id)));
+
+  const mappedSplitters = nodeSplitters
+    .sort((a, b) => a.id - b.id)
+    .map(s => {
+      const outputs = (s.outputs || []).map(o => ({ ...o }));
+      outputs.sort((a, b) => a.portNumber - b.portNumber);
+      return { ...s, outputs };
+    });
+
+  const remainingUnassignedChildren = unassignedChildren;
+  const usedPorts = mappedSplitters.reduce((a, s) => a + (s.outputs || []).filter(o => o.isUsed).length, 0);
 
   return (
     <div style={{ position: "relative", marginLeft: depth > 0 ? "28px" : "0" }}>
@@ -192,14 +202,14 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
         </div>
 
         {/* Splitter ports directly inside NodeCard */}
-        {!collapsed && nodeSplitters.length > 0 && (
+        {!collapsed && mappedSplitters.length > 0 && (
           <div style={{ padding: "0 14px 12px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px", borderTop: "1px solid #e2e8f0", paddingTop: "10px" }}>
-              {nodeSplitters.flatMap((s, sIdx) => 
+              {mappedSplitters.flatMap((s, sIdx) => 
                 (s.outputs || []).map(o => {
-                  const childNode = (node.children || []).find(cn => Number(cn.id) === Number(o.targetNodeId) || (o.targetNode && Number(cn.id) === Number(o.targetNode.id)));
+                  const childNode = (node.children || []).find(cn => Number(cn.id) === Number(o.targetNodeId) || (o.targetNode && Number(cn.id) === Number(o.targetNode.id))) || o.targetNode;
                   const isPortExpanded = !!expandedPorts[o.id];
-                  const portLabel = nodeSplitters.length > 1 ? `S${sIdx+1}-#${o.portNumber}` : `#${o.portNumber}`;
+                  const portLabel = mappedSplitters.length > 1 ? `S${sIdx+1}-#${o.portNumber}` : `#${o.portNumber}`;
 
                   return (
                     <div key={o.id} style={{
@@ -301,13 +311,13 @@ function NodeCard({ node, depth, splitters, realtimeTopology, onEdit, onDelete, 
       </div>
 
       {/* Children (rekursif) */}
-      {!collapsed && unassignedChildren.length > 0 && (
+      {!collapsed && remainingUnassignedChildren.length > 0 && (
         <div style={{ position: "relative" }}>
           <div style={{
             position: "absolute", left: "8px", top: "-4px", bottom: "24px",
             width: "2px", background: cfg.color, opacity: 0.3, borderRadius: "2px"
           }} />
-          {renderTree(unassignedChildren, depth + 1)}
+          {renderTree(remainingUnassignedChildren, depth + 1)}
         </div>
       )}
     </div>

@@ -100,6 +100,13 @@ async function startRouterWorker(router) {
         await delay(3000);
 
       } catch (err) {
+        // Jika router sudah dihapus dari DB (Prisma P2025 Record not found), hentikan worker
+        if (err.code === "P2025" || err.message.includes("Record to update not found")) {
+          console.warn(`[MONITOR] Router ${router.name} (${router.host}) telah dihapus dari database. Menghentikan worker.`);
+          stopRouterWorker(router.id);
+          break;
+        }
+
         // ─── Router tidak bisa diakses ───
         console.warn(`[MONITOR] ⚠️ Router OFFLINE: ${router.name} (${router.host}) — ${err.message}`);
 

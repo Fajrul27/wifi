@@ -13,7 +13,9 @@ datasource db {
 
 enum Role {
   ADMIN
+  ADMIN_NOC
   TEKNISI
+  HELPDESK
 }
 
 // ======================================================

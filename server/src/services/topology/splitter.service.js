@@ -138,7 +138,7 @@ class SplitterService {
       }
 
       // 3. Update status port splitter
-      return await tx.splitterOutput.update({
+      const updatedOutput = await tx.splitterOutput.update({
         where: { id },
         data: {
           isUsed: true,
@@ -151,6 +151,37 @@ class SplitterService {
           splitter: true,
         },
       });
+
+      // 🔥 OTOMATIS: Aktifkan kembali internet di Mikrotik (Enable secret)
+      if (clientId) {
+        const user = await tx.pppoeUser.findUnique({ where: { id: Number(clientId) } });
+        if (user && user.routerId) {
+          try {
+            const router = await tx.router.findUnique({ where: { id: user.routerId } });
+            if (router) {
+              const monitoring = require("../admin/monitoring");
+              const pppoeService = monitoring.getPppoeService(router);
+              await pppoeService.connect();
+              
+              // Cari & Enable di /ppp/secret
+              const secrets = await pppoeService.write("/ppp/secret/print", [
+                `?name=${user.username}`
+              ]);
+              if (secrets && secrets.length > 0) {
+                await pppoeService.write("/ppp/secret/set", [
+                  `=.id=${secrets[0][".id"]}`,
+                  "=disabled=no"
+                ]);
+                console.log(`[Provisioning] Enabled PPPoE user secret: ${user.username}`);
+              }
+            }
+          } catch (err) {
+            console.error("Gagal enable Mikrotik saat pasang:", err.message);
+          }
+        }
+      }
+
+      return updatedOutput;
     });
   }
 
@@ -180,14 +211,14 @@ class SplitterService {
       }
     });
 
-    // Jika ada clientId, update PppoeUser dan DISABLE di Mikrotik
+    // Jika ada clientId, update PppoeUser dan pastikan tetap ENABLE di Mikrotik (Opsi B)
     if (clientId) {
       const user = await prisma.pppoeUser.update({
         where: { id: Number(clientId) },
         data: { topologyNodeId: null }
       });
 
-      // 🔥 OTOMATIS: Matikan internet di Mikrotik
+      // 🔥 OPSI B: Pastikan akun tetap aktif di Mikrotik (disabled=no) agar tetap Online (Unassigned)
       try {
         const router = await prisma.router.findUnique({ where: { id: user.routerId } });
         if (router) {
@@ -195,21 +226,20 @@ class SplitterService {
           const pppoeService = monitoring.getPppoeService(router);
           await pppoeService.connect();
           
-          // Cari .id di Mikrotik berdasarkan username
+          // Cari & Pastikan Enable di /ppp/secret
           const secrets = await pppoeService.write("/ppp/secret/print", [
             `?name=${user.username}`
           ]);
-          
           if (secrets && secrets.length > 0) {
             await pppoeService.write("/ppp/secret/set", [
               `=.id=${secrets[0][".id"]}`,
-              "=disabled=yes"
+              "=disabled=no"
             ]);
-            console.log(`[Provisioning] Disabled PPPoE user: ${user.username}`);
+            console.log(`[Provisioning] Maintained PPPoE user secret active (Option B): ${user.username}`);
           }
         }
       } catch (err) {
-        console.error("Gagal disable Mikrotik:", err.message);
+        console.error("Gagal maintain Mikrotik (Option B):", err.message);
       }
     }
 

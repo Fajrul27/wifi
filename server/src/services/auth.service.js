@@ -97,6 +97,55 @@ class AuthService {
     const result = await redis.get(`blacklist:${token}`);
     return !!result;
   }
+
+  /* =========================
+     UPDATE PROFILE
+  ========================= */
+  static async updateProfile(userId, data) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error("User tidak ditemukan");
+
+    if (data.username || data.email) {
+      const existing = await prisma.user.findFirst({
+        where: {
+          AND: [
+            { id: { not: userId } },
+            {
+              OR: [
+                { email: data.email },
+                { username: data.username },
+              ],
+            },
+          ],
+        },
+      });
+      if (existing) throw new Error("Email atau username sudah digunakan oleh akun lain");
+    }
+
+    const updatedData = {
+      username: data.username,
+      email: data.email,
+    };
+
+    if (data.password) {
+      updatedData.password = await bcrypt.hash(data.password, 10);
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updatedData,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    const token = generateToken(updatedUser);
+    return { user: updatedUser, token };
+  }
 }
 
 module.exports = AuthService;

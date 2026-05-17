@@ -25,7 +25,7 @@ export default function Login() {
       const user = res.data.user; // ✔ dari backend
 
       // ✔ REDIRECT BERDASARKAN ROLE
-      if (user.role === "ADMIN") {
+      if (["ADMIN", "ADMIN_NOC", "HELPDESK"].includes(user.role)) {
         navigate("/admin");
       } else if (user.role === "TEKNISI") {
         navigate("/teknisi");

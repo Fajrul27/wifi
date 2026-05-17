@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import api from "../../services/api";
 import { getLimitByRange } from "./utils";
 
@@ -41,7 +41,7 @@ const normalizeTraffic = (v) => {
    HOOK MONITOR (FINAL STABLE)
 ───────────────────────────── */
 export const useRouterMonitor = (selectedRouter, timeRange) => {
-  const wsRef = useRef(null);
+  // wsRef is not needed
 
   const [socketConnected, setSocketConnected] = useState(false);
   const [routers, setRouters] = useState([]);

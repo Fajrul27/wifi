@@ -34,6 +34,23 @@ function formatBandwidth(bps = 0) {
 }
 
 // =========================
+// FORMAT DURATION
+// =========================
+function formatDuration(ms = 0) {
+  const sec = Math.floor(ms / 1000);
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  let out = "";
+  if (d) out += `${d}d `;
+  if (h) out += `${h}h `;
+  if (m) out += `${m}m `;
+  if (s || !out) out += `${s}s`;
+  return out.trim();
+}
+
+// =========================
 // NORMALIZE KEY
 // =========================
 const normalizeKey = (name = "") =>
@@ -121,41 +138,80 @@ controller.getUsers = async (req, res) => {
     await service.connect();
 
     const activeUsers = await service.getActiveUsers();
+    const secrets = await service.write("/ppp/secret/print");
 
     const activeMap = {};
     for (const a of activeUsers) {
-      // Gunakan normalizeKey agar konsisten dengan PppoeService
       activeMap[normalizeKey(a.name)] = a;
+    }
+
+    const secretMap = {};
+    for (const s of secrets || []) {
+      secretMap[normalizeKey(s.name)] = s;
     }
 
     const result = [];
 
     for (const u of users) {
-      // Gunakan normalizeKey agar konsisten dengan PppoeService
       const active = activeMap[normalizeKey(u.username)];
+      const secret = secretMap[normalizeKey(u.username)];
 
       let rx = 0;
       let tx = 0;
 
       if (active) {
-        const iface =
-  active.interface || `<pppoe-${u.username}>`;
+        const iface = active.interface || `<pppoe-${u.username}>`;
         const t = await service.getInterfaceTraffic(iface);
-
         rx = t.rx;
         tx = t.tx;
+      }
+
+      // Ambil IP & comment dari secret Mikrotik jika ada (fallback ke DB)
+      const remoteAddr = secret?.["remote-address"] || u.remoteAddress || null;
+      const localAddr = secret?.["local-address"] || u.localAddress || null;
+      const ket = secret?.comment || u.keterangan || "";
+      const prof = secret?.profile || u.profile || null;
+
+      // Update DB di background jika data di DB berbeda dengan Mikrotik secret
+      if (
+        u.remoteAddress !== remoteAddr ||
+        u.localAddress !== localAddr ||
+        u.keterangan !== ket ||
+        u.profile !== prof
+      ) {
+        prisma.pppoeUser.update({
+          where: { id: u.id },
+          data: {
+            remoteAddress: remoteAddr,
+            localAddress: localAddr,
+            keterangan: ket,
+            profile: prof,
+          },
+        }).catch(() => {});
+      }
+
+      let downtime = "-";
+      if (!active) {
+        const refTime = u.lastDisconnect || u.lastSeen;
+        if (refTime) {
+          downtime = formatDuration(Date.now() - new Date(refTime).getTime());
+        } else {
+          downtime = "Offline";
+        }
       }
 
       result.push({
         id: u.id,
         username: u.username,
-        profile: u.profile || null,
+        profile: prof,
+        keterangan: ket,
 
         isOnline: !!active,
         uptime: active?.uptime || null,
+        downtime,
 
-        localAddress: u.localAddress || null,
-        remoteAddress: active?.address || u.remoteAddress || null,
+        localAddress: localAddr,
+        remoteAddress: active?.address || remoteAddr,
 
         rxRaw: rx,
         txRaw: tx,

@@ -179,27 +179,22 @@ class PppoeService {
 
   /* =========================
      RE-SYNC SETELAH RECONNECT
-     Langsung update semua user jadi offline dulu,
-     lalu jalankan realtime untuk dapat data fresh
+     Invalidasi cache agar ambil data fresh dari Mikrotik
   ========================= */
   async _resyncAfterReconnect() {
     try {
-      // Reset semua user jadi offline dulu (data bersih)
-      await prisma.pppoeUser.updateMany({
-        where: { routerId: this.router.id },
-        data: { isOnline: false },
-      });
-
       // Invalidasi cache agar ambil data fresh
       this.cacheTime = 0;
       this.cacheActive = [];
       this.topologyNodesCache = null;
       this.topologyNodesCacheTime = 0;
 
-      console.log(`[PPPoE][${this.router.host}] Cache direset, sinkronisasi dimulai...`);
+      console.log(`[PPPoE][${this.router.host}] Cache direset setelah reconnect.`);
 
-      // Jalankan update langsung
-      await this.updateRealtime();
+      // Jika tidak sedang dalam proses updateRealtime, jalankan update
+      if (!this.updating) {
+        await this.updateRealtime();
+      }
     } catch (err) {
       console.error(`[PPPoE] Gagal re-sync:`, err.message);
     }
@@ -222,10 +217,12 @@ class PppoeService {
      WRITE SAFE (MUTEX + TIMEOUT)
   ========================= */
   async write(path, params = []) {
-    while (this.isWriting) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    this.isWriting = true;
+    const prev = this.writeQueue || Promise.resolve();
+    let release;
+    this.writeQueue = new Promise(resolve => { release = resolve; });
+
+    await prev.catch(() => {});
+
     try {
       const connected = await this.connect();
       if (!connected) throw new Error("Tidak dapat terhubung ke Mikrotik");
@@ -236,7 +233,7 @@ class PppoeService {
       ]);
       return res;
     } finally {
-      this.isWriting = false;
+      release();
     }
   }
 
@@ -300,17 +297,32 @@ class PppoeService {
     const dbUsers = await prisma.pppoeUser.findMany({ where: { routerId: this.router.id } });
     const dbUserMap = new Map(dbUsers.map(u => [u.username, u]));
 
-    // A. Dari Mikrotik ke DB (Pull secret yang belum ada di DB atau update profilnya)
+    // A. Dari Mikrotik ke DB (Pull secret yang belum ada di DB atau update profil/IP/komentarnya)
     for (const s of secrets || []) {
       const username = String(s.name || "").trim();
       if (!username) continue;
 
       const existing = dbUserMap.get(username);
+      const sProfile = s.profile || null;
+      const sRemote = s["remote-address"] || null;
+      const sLocal = s["local-address"] || null;
+      const sComment = s.comment || null;
+
       if (existing) {
-        if (existing.profile !== (s.profile || null)) {
+        if (
+          existing.profile !== sProfile ||
+          existing.remoteAddress !== sRemote ||
+          existing.localAddress !== sLocal ||
+          existing.keterangan !== sComment
+        ) {
           await prisma.pppoeUser.update({
             where: { id: existing.id },
-            data: { profile: s.profile || null },
+            data: {
+              profile: sProfile,
+              remoteAddress: sRemote,
+              localAddress: sLocal,
+              keterangan: sComment || existing.keterangan,
+            },
           });
           updatedUsers++;
         }
@@ -319,7 +331,10 @@ class PppoeService {
           data: {
             routerId: this.router.id,
             username,
-            profile: s.profile || null,
+            profile: sProfile,
+            remoteAddress: sRemote,
+            localAddress: sLocal,
+            keterangan: sComment || "",
             isOnline: false,
           },
         });
@@ -335,6 +350,8 @@ class PppoeService {
           `=password=12345678`, // Default password jika hilang dari mikrotik
           `=service=pppoe`,
           u.profile ? `=profile=${u.profile}` : "=profile=default",
+          u.remoteAddress ? `=remote-address=${u.remoteAddress}` : "",
+          u.localAddress ? `=local-address=${u.localAddress}` : "",
           u.keterangan ? `=comment=${u.keterangan}` : "",
         ].filter(Boolean));
         createdUsers++;
@@ -453,68 +470,69 @@ class PppoeService {
         where: { routerId: this.router.id },
       });
 
-      const realtimeUsers = await Promise.all(
-        users.map(async (user) => {
-          // Gunakan normalizeKey untuk konsistensi matching
-          const active = activeMap[normalizeKey(user.username)];
+      const realtimeUsers = [];
+      for (const user of users) {
+        const active = activeMap[normalizeKey(user.username)];
+        let rx = 0, tx = 0;
 
-          let rx = 0, tx = 0;
-
-          if (active) {
-            try {
-              let iface = active.interface || `<pppoe-${user.username}>`;
-              let traffic = await this.getInterfaceTraffic(iface);
-              if (traffic.rx === 0 && traffic.tx === 0) {
-                const fallbackIface = `pppoe-${user.username}`;
-                const fallbackTraffic = await this.getInterfaceTraffic(fallbackIface);
-                if (fallbackTraffic.rx > 0 || fallbackTraffic.tx > 0) {
-                  traffic = fallbackTraffic;
-                }
+        if (active) {
+          try {
+            let iface = active.interface || `<pppoe-${user.username}>`;
+            let traffic = await this.getInterfaceTraffic(iface);
+            if (traffic.rx === 0 && traffic.tx === 0) {
+              const fallbackIface = `pppoe-${user.username}`;
+              const fallbackTraffic = await this.getInterfaceTraffic(fallbackIface);
+              if (fallbackTraffic.rx > 0 || fallbackTraffic.tx > 0) {
+                traffic = fallbackTraffic;
               }
-              rx = traffic.rx;
-              tx = traffic.tx;
-            } catch { }
-          }
+            }
+            rx = traffic.rx;
+            tx = traffic.tx;
+          } catch { }
+        }
 
-          // Update DB
-          const updatedUser = await prisma.pppoeUser.update({
-            where: { id: user.id },
-            data: {
-              isOnline: !!active,
-              localAddress: user.localAddress || null,
-              remoteAddress: active?.address || user.remoteAddress || null,
-              lastSeen: active ? new Date() : user.lastSeen,
-              lastDisconnect: (!active && user.isOnline) ? new Date() : user.lastDisconnect,
-            },
-          });
-
-          let downtime = null;
-          if (!active && updatedUser.lastSeen) {
-            const diff = Date.now() - new Date(updatedUser.lastSeen).getTime();
-            downtime = formatDuration(diff);
-          }
-
-          return {
-            id: user.id,
-            username: user.username,
-            profile: user.profile,
-            keterangan: user.keterangan || "",
+        // Update DB
+        const updatedUser = await prisma.pppoeUser.update({
+          where: { id: user.id },
+          data: {
             isOnline: !!active,
-            uptime: active?.uptime || null,
-            downtime,
-            lastSeen: updatedUser.lastSeen,
-            lastDisconnect: updatedUser.lastDisconnect,
-            rxBps: rx, txBps: tx,
-            rxHuman: formatBandwidth(rx),
-            txHuman: formatBandwidth(tx),
             localAddress: user.localAddress || null,
             remoteAddress: active?.address || user.remoteAddress || null,
-            latitude: user.latitude ?? null,
-            longitude: user.longitude ?? null,
-            topologyNodeId: user.topologyNodeId ?? null,
-          };
-        })
-      );
+            lastSeen: active ? new Date() : user.lastSeen,
+            lastDisconnect: (!active && user.isOnline) ? new Date() : user.lastDisconnect,
+          },
+        });
+
+        let downtime = "-";
+        if (!active) {
+          const refTime = updatedUser.lastDisconnect || updatedUser.lastSeen;
+          if (refTime) {
+            downtime = formatDuration(Date.now() - new Date(refTime).getTime());
+          } else {
+            downtime = "Offline";
+          }
+        }
+
+        realtimeUsers.push({
+          id: user.id,
+          username: user.username,
+          profile: user.profile,
+          keterangan: user.keterangan || "",
+          isOnline: !!active,
+          uptime: active?.uptime || null,
+          downtime,
+          lastSeen: updatedUser.lastSeen,
+          lastDisconnect: updatedUser.lastDisconnect,
+          rxBps: rx, txBps: tx,
+          rxHuman: formatBandwidth(rx),
+          txHuman: formatBandwidth(tx),
+          localAddress: user.localAddress || null,
+          remoteAddress: active?.address || user.remoteAddress || null,
+          latitude: user.latitude ?? null,
+          longitude: user.longitude ?? null,
+          topologyNodeId: user.topologyNodeId ?? null,
+        });
+      }
 
       broadcast({
         type: "pppoe-realtime",

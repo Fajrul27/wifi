@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect } from "react";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
 import { parseOnlineStatus, parseUptime } from "./utils";
@@ -64,7 +64,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
   const [locationFilter, setLocationFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name-asc");
 
-  const socketRef = useRef(null);
+  // socketRef is not needed
 
   /* ───────── LOAD USERS ───────── */
   const loadUsers = async (routerId) => {
@@ -83,6 +83,8 @@ export const usePppoeUserMonitor = (selectedRouter) => {
           profile: u.profile || "",
           keterangan: u.keterangan || "",
 
+          localAddress: u.localAddress || "",
+          remoteAddress: u.remoteAddress || "",
           ip: u.localAddress || u.remoteAddress || "-",
 
           isOnline: parseOnlineStatus(u.isOnline),
@@ -95,6 +97,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
           latitude: u.latitude ?? null,
           longitude: u.longitude ?? null,
+          topologyNodeId: u.topologyNodeId ?? null,
         }))
       );
     } catch (err) {
@@ -140,9 +143,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
             rx: Number(r.rxBps ?? r.rxRaw ?? old.rx ?? 0),
             tx: Number(r.txBps ?? r.txRaw ?? old.tx ?? 0),
             uptime: isOnline ? (r.uptime || "-") : "-",
-            downtime: !isOnline
-              ? (r.downtime && r.downtime !== "0s" ? r.downtime : "0s")
-              : "-",
+            downtime: !isOnline ? (r.downtime || "-") : "-",
             latitude: old.latitude ?? null,
             longitude: old.longitude ?? null,
           });

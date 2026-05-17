@@ -14,9 +14,9 @@ const hasOnlineDescendant = (node) => {
 ───────────────────────────────────────────── */
 const typeConfig = {
   ROUTER:   { color: '#0f172a', bg: '#f8fafc', icon: 'bi-router-fill' },
-  OLT_PORT: { color: '#3b82f6', bg: '#eff6ff', icon: 'bi-ethernet' },
-  ODC:      { color: '#06b6d4', bg: '#ecfeff', icon: 'bi-box-fill' },
-  ODP:      { color: '#f59e0b', bg: '#fffbeb', icon: 'bi-house-gear-fill' },
+  OLT_PORT: { color: '#3b82f6', bg: '#eff6ff', icon: 'bi-hdd-rack-fill' },
+  ODC:      { color: '#06b6d4', bg: '#ecfeff', icon: 'bi-hdd-network-fill' },
+  ODP:      { color: '#f59e0b', bg: '#fffbeb', icon: 'bi-modem-fill' },
   SPLITTER: { color: '#8b5cf6', bg: '#f5f3ff', icon: 'bi-diagram-3-fill' },
   USER:     { color: '#22c55e', bg: '#f0fdf4', icon: 'bi-pc-display-horizontal' },
 };
@@ -26,7 +26,7 @@ const typeConfig = {
 ───────────────────────────────────────────── */
 const NodeCard = ({ item, onClick }) => {
   const isUserOnline = item.type === 'USER' && item.status === 'ONLINE';
-  const isUserOffline = item.type === 'USER' && item.status !== 'ONLINE';
+  // isUserOffline is not used
   const hasOnline = item.type !== 'USER' && hasOnlineDescendant(item);
 
   // Warna border: user mengikuti statusnya sendiri, node lain mengikuti cucu
@@ -101,8 +101,8 @@ const NodeCard = ({ item, onClick }) => {
         </div>
       )}
 
-      {/* Badge kapasitas untuk SPLITTER */}
-      {item.type === 'SPLITTER' && (
+      {/* Badge kapasitas untuk SPLITTER/ODP/ODC */}
+      {(item.type === 'ODP' || item.type === 'ODC' || item.type === 'SPLITTER') && item.capacity && (
         <div style={{ marginTop: '4px', fontSize: '0.5rem', fontWeight: 700, color: '#d97706', background: '#fffbeb', borderRadius: '999px', padding: '1px 8px', display: 'inline-block' }}>
           {item.usedPorts}/{item.capacity} port
         </div>
@@ -174,7 +174,7 @@ const TopologyFlowChart = ({ nodes, splitters, oltPorts, pppoeUsers, realtimeTop
       nodeMap[n.id] = { ...n, status: rt.status || 'UNKNOWN', reason: rt.reason || '' };
     });
 
-    // Fungsi build subtree (ODC -> ODP -> Splitter -> User)
+    // Fungsi build subtree (ODC -> ODP -> User)
     const buildSubTree = (nodeId) => {
       const node = nodeMap[nodeId];
       if (!node) return null;
@@ -184,6 +184,10 @@ const TopologyFlowChart = ({ nodes, splitters, oltPorts, pppoeUsers, realtimeTop
       );
       const subChildren = childNodes.map(c => buildSubTree(c.id)).filter(Boolean);
 
+      let capacity = null;
+      let usedPorts = 0;
+      let allPorts = [];
+
       splitters
         .filter(s => Number(s.nodeId) === Number(nodeId))
         .forEach(s => {
@@ -191,39 +195,64 @@ const TopologyFlowChart = ({ nodes, splitters, oltPorts, pppoeUsers, realtimeTop
           const connectedUsers = pppoeUsers.filter(u =>
             outputs.some(o => o.isUsed === true && Number(o.clientId) === Number(u.id))
           );
-          const allPorts = outputs.map(o => {
+          
+          const assignedChildNodeIds = new Set(
+            outputs.filter(o => o.isUsed && o.targetNodeId).map(o => Number(o.targetNodeId))
+          );
+          const unassignedChildNodes = childNodes.filter(c => !assignedChildNodeIds.has(Number(c.id)));
+          let unassignedIndex = 0;
+
+          allPorts = outputs.map(o => {
             const user = pppoeUsers.find(u => Number(u.id) === Number(o.clientId));
-            return { portNumber: o.portNumber, isUsed: o.isUsed, clientId: o.clientId, username: user?.username || null, isOnline: user?.isOnline || false };
+            let targetNode = nodes.find(n => Number(n.id) === Number(o.targetNodeId));
+            let isUsed = o.isUsed;
+
+            if (!isUsed && unassignedIndex < unassignedChildNodes.length) {
+              targetNode = unassignedChildNodes[unassignedIndex];
+              isUsed = true;
+              unassignedIndex++;
+            }
+
+            const name = user ? user.username : (targetNode ? `[${targetNode.type}] ${targetNode.name}` : (isUsed ? 'Terpakai' : null));
+            const isOnline = user ? user.isOnline : (targetNode ? true : false);
+            return { 
+              portNumber: o.portNumber, 
+              isUsed: isUsed, 
+              clientId: o.clientId, 
+              targetNodeId: targetNode?.id || o.targetNodeId,
+              username: name, 
+              isOnline: isOnline 
+            };
           }).sort((a, b) => a.portNumber - b.portNumber);
 
-          subChildren.push({
-            id: `splitter-${s.id}`,
-            name: s.name || `Splitter 1:${s.outputPort}`,
-            type: 'SPLITTER',
-            status: node.status,
-            capacity: s.outputPort,
-            usedPorts: connectedUsers.length,
-            allPorts,
-            children: connectedUsers.map(u => {
-              const output = outputs.find(o => o.isUsed && Number(o.clientId) === Number(u.id));
-              return {
-                id: `user-${u.id}`,
-                name: u.username,
-                type: 'USER',
-                status: u.isOnline ? 'ONLINE' : 'OFFLINE',
-                portNumber: output?.portNumber ?? '-',
-                remoteAddress: u.remoteAddress || '-',
-                localAddress: u.localAddress || '-',
-                profile: u.profile || '-',
-                lastSeen: u.lastSeen,
-                lastDisconnect: u.lastDisconnect,
-                children: [],
-              };
-            }),
+          capacity = s.outputPort;
+          usedPorts = allPorts.filter(p => p.isUsed).length;
+
+          connectedUsers.forEach(u => {
+            const output = outputs.find(o => o.isUsed && Number(o.clientId) === Number(u.id));
+            subChildren.push({
+              id: `user-${u.id}`,
+              name: u.username,
+              type: 'USER',
+              status: u.isOnline ? 'ONLINE' : 'OFFLINE',
+              portNumber: output?.portNumber ?? '-',
+              remoteAddress: u.remoteAddress || '-',
+              localAddress: u.localAddress || '-',
+              profile: u.profile || '-',
+              lastSeen: u.lastSeen,
+              lastDisconnect: u.lastDisconnect,
+              children: [],
+            });
           });
         });
 
-      return { ...node, children: subChildren };
+      return { 
+        ...node, 
+        capacity: capacity || node.capacity,
+        usedPorts: capacity ? usedPorts : node.usedPorts,
+        allPorts: capacity ? allPorts : node.allPorts,
+        children: subChildren 
+      };
     };
 
     // Buat tree: Router (root) -> OLT Port -> ODC/ODP/...
@@ -343,8 +372,8 @@ const TopologyFlowChart = ({ nodes, splitters, oltPorts, pppoeUsers, realtimeTop
                     </tr>
                   </>}
 
-                  {/* SPLITTER specific */}
-                  {selectedItem.type === 'SPLITTER' && <>
+                  {/* SPLITTER / ODP / ODC specific */}
+                  {(selectedItem.type === 'ODP' || selectedItem.type === 'ODC' || selectedItem.type === 'SPLITTER') && selectedItem.capacity && <>
                     <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '8px 0', color: '#64748b', fontWeight: 600 }}>Kapasitas</td>
                       <td style={{ padding: '8px 0', fontWeight: 700 }}>1:{selectedItem.capacity}</td>

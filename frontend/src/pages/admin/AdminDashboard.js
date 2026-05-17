@@ -1,30 +1,56 @@
 // components/FtthTopologyMap.jsx
-import React, { useMemo, useCallback, useState, useEffect } from "react";
+import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import api from "../../services/api";
+import { socket } from "../../services/socket";
 
 // Fix default Leaflet marker icons (untuk webpack/Vite)
 const iconAnchor = [12, 41];
 const popupAnchor = [1, -34];
 
-const createCustomIcon = (color, iconClass) => {
+const createCustomIcon = (color, iconClass, isOffline = false) => {
+  const pulseHtml = isOffline ? `
+    <div style="
+      position: absolute;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.35);
+      border: 2px solid rgba(239, 68, 68, 0.8);
+      animation: radar-pulse 1.8s infinite ease-out;
+      z-index: 1;
+    "></div>
+  ` : '';
+
   return L.divIcon({
     className: "custom-marker",
-    html: `<div style="
-      background: ${color};
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 3px solid white;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-size: 14px;
-    "><i class="bi ${iconClass}"></i></div>`,
+    html: `
+      <style>
+        @keyframes radar-pulse {
+          0% { transform: scale(0.45); opacity: 0.9; }
+          100% { transform: scale(2.2); opacity: 0; }
+        }
+      </style>
+      <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;">
+        ${pulseHtml}
+        <div style="
+          background: ${color};
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 14px;
+          z-index: 10;
+        "><i class="bi ${iconClass}"></i></div>
+      </div>
+    `,
     iconSize: [28, 28],
     iconAnchor,
     popupAnchor,
@@ -33,27 +59,33 @@ const createCustomIcon = (color, iconClass) => {
 
 // Marker icons by entity type
 const MARKER_CONFIG = {
-  router: { color: "#0d6efd", icon: "bi-hdd-network", label: "Router" },
-  oltPort: { color: "#6f42c1", icon: "bi-plug", label: "OLT Port" },
-  ODC: { color: "#198754", icon: "bi-diagram-2", label: "ODC" },
-  ODP: { color: "#ffc107", icon: "bi-diagram-3", label: "ODP", textColor: "#212529" },
-  splitter: { color: "#fd7e14", icon: "bi-git", label: "Splitter" },
-  client: { color: "#dc3545", icon: "bi-person", label: "Client" },
+  router: { color: "#0ea5e9", icon: "bi-router-fill", label: "Router" },
+  oltPort: { color: "#2563eb", icon: "bi-hdd-rack-fill", label: "OLT Port" },
+  ODC: { color: "#8b5cf6", icon: "bi-hdd-network-fill", label: "ODC" },
+  ODP: { color: "#f59e0b", icon: "bi-modem-fill", label: "ODP", textColor: "#212529" },
+  splitter: { color: "#ea580c", icon: "bi-diagram-3-fill", label: "Splitter" },
+  client: { color: "#10b981", icon: "bi-pc-display-horizontal", label: "Client" },
 };
 
 // Component to auto-fit map bounds to markers
-function FitMapBounds({ coordinates }) {
+function FitMapBounds({ coordinates, selectedRouter }) {
   const map = useMap();
+  const prevRouterRef = useRef(undefined);
+  const hasFittedRef = useRef(false);
   
   useEffect(() => {
     if (coordinates?.length > 0) {
-      const validCoords = coordinates.filter(c => c && c.lat && c.lng && !isNaN(c.lat) && !isNaN(c.lng) && c.lat >= -90 && c.lat <= 90 && c.lng >= -180 && c.lng <= 180);
-      if (validCoords.length > 0) {
-        const bounds = L.latLngBounds(validCoords.map(c => [c.lat, c.lng]));
-        map.fitBounds(bounds.pad(0.1));
+      if (!hasFittedRef.current || prevRouterRef.current !== selectedRouter) {
+        const validCoords = coordinates.filter(c => c && c.lat && c.lng && !isNaN(c.lat) && !isNaN(c.lng) && c.lat >= -90 && c.lat <= 90 && c.lng >= -180 && c.lng <= 180);
+        if (validCoords.length > 0) {
+          const bounds = L.latLngBounds(validCoords.map(c => [c.lat, c.lng]));
+          map.fitBounds(bounds.pad(0.1));
+          hasFittedRef.current = true;
+          prevRouterRef.current = selectedRouter;
+        }
       }
     }
-  }, [coordinates, map]);
+  }, [coordinates, selectedRouter, map]);
   
   return null;
 }
@@ -86,6 +118,7 @@ export default function FtthTopologyMap({
   const routers = isStandalone ? apiRouters : propRouters;
   const oltPorts = isStandalone ? apiOltPorts : propOltPorts;
   const nodes = isStandalone ? apiNodes : propNodes;
+  // eslint-disable-next-line no-unused-vars
   const splitters = isStandalone ? apiSplitters : propSplitters;
   const pppoeUsers = isStandalone ? apiUsers : propUsers;
   const selectedRouter = isStandalone ? apiSelectedRouter : propSelectedRouter;
@@ -126,6 +159,52 @@ export default function FtthTopologyMap({
       }
     }).finally(() => setLoading(false));
   }, [isStandalone]);
+
+  // 🔌 Socket realtime — update langsung dari payload tanpa API call (Hanya jika isStandalone)
+  useEffect(() => {
+    if (!isStandalone || !selectedRouter) return;
+
+    // ─── Update status topologi node (misal ada perubahan status dari backend) ───
+    const handleTopologyStatus = (data) => {
+      if (Number(data?.routerId) !== Number(selectedRouter)) return;
+      // Jika ada kebutuhan update node di masa depan
+    };
+
+    // ─── Update status user PPPoE LANGSUNG dari socket (tanpa API call) ───
+    const handlePppoeRealtime = (data) => {
+      if (Number(data?.routerId) !== Number(selectedRouter)) return;
+      const incoming = data?.data;
+      if (!Array.isArray(incoming) || incoming.length === 0) return;
+
+      setApiUsers((prev) => {
+        const map = new Map(prev.map((u) => [u.id, u]));
+        for (const r of incoming) {
+          const old = map.get(r.id) || {};
+          map.set(r.id, {
+            ...old,
+            id: r.id,
+            username: r.username || old.username,
+            isOnline: !!r.isOnline,
+            profile: r.profile || old.profile || '-',
+            remoteAddress: r.remoteAddress || old.remoteAddress || null,
+            localAddress: r.localAddress || old.localAddress || null,
+            uptime: r.isOnline ? (r.uptime || null) : null,
+            lastSeen: r.lastSeen || old.lastSeen,
+            lastDisconnect: r.lastDisconnect || old.lastDisconnect,
+          });
+        }
+        return Array.from(map.values());
+      });
+    };
+
+    socket.on("topology-status-realtime", handleTopologyStatus);
+    socket.on("pppoe-realtime", handlePppoeRealtime);
+
+    return () => {
+      socket.off("topology-status-realtime", handleTopologyStatus);
+      socket.off("pppoe-realtime", handlePppoeRealtime);
+    };
+  }, [isStandalone, selectedRouter]);
 
   // Filter data by selected router
   const filteredOltPorts = useMemo(() => {
@@ -200,20 +279,41 @@ export default function FtthTopologyMap({
     }
   }, [allCoordinates]);
 
+  // Helper: cek apakah sebuah node (ODC/ODP) memiliki setidaknya 1 user online di bawahnya (termasuk anak cabangnya)
+  const hasOnlineUser = useCallback((nodeId) => {
+    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
+    if (directUsers.some(u => u.isOnline)) return true;
+    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
+    return childNodes.some(child => hasOnlineUser(child.id));
+  }, [filteredUsers, filteredNodes]);
+
+  // Helper: cek apakah node ini memiliki user sama sekali (langsung atau di anak cabang)
+  const hasAnyUser = useCallback((nodeId) => {
+    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
+    if (directUsers.length > 0) return true;
+    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
+    return childNodes.some(child => hasAnyUser(child.id));
+  }, [filteredUsers, filteredNodes]);
+
   // Build topology connections (lines)
   const connections = useMemo(() => {
     const lines = [];
-    
-    // OLT Port → ODC connections
-    filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId).forEach(node => {
+
+    // OLT Port → ODC connections (Hanya untuk ROOT ODC yang tidak memiliki parent/incoming link)
+    filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
       const port = filteredOltPorts.find(p => p.id === node.oltPortId);
       if (isValidCoord(port?.latitude, port?.longitude) && isValidCoord(node.latitude, node.longitude)) {
+        const anyUser = hasAnyUser(node.id);
+        const isOnline = anyUser ? hasOnlineUser(node.id) : true;
         lines.push({
           id: `olt-${node.id}`,
           coordinates: [[Number(port.latitude), Number(port.longitude)], [Number(node.latitude), Number(node.longitude)]],
           type: 'olt-to-odc',
-          color: '#6f42c1',
-          weight: 3,
+          color: !anyUser ? '#94a3b8' : (isOnline ? '#2563eb' : '#ef4444'),
+          weight: !anyUser ? 3 : (isOnline ? 4 : 5),
+          dashArray: !anyUser ? '4,4' : (isOnline ? undefined : '8,6'),
+          label: !anyUser ? `Kabel Feeder OLT ➔ ${node.name} (Belum ada pelanggan)` : (isOnline ? `Kabel Feeder OLT ➔ ${node.name} (Aktif)` : `⚠️ KABEL FEEDER PUTUS: OLT ➔ ${node.name} Total Offline!`),
+          sublabel: !anyUser ? 'Jalur pasif' : (isOnline ? 'Transmisi GPON Normal' : 'Periksa SFP OLT atau kabel utama fiber optik'),
         });
       }
     });
@@ -224,13 +324,26 @@ export default function FtthTopologyMap({
       if (parentId) {
         const parent = filteredNodes.find(n => n.id === parentId);
         if (isValidCoord(parent?.latitude, parent?.longitude) && isValidCoord(node.latitude, node.longitude)) {
+          const anyUser = hasAnyUser(node.id);
+          const isOnline = anyUser ? hasOnlineUser(node.id) : true;
+          const isODP = node.type === 'ODP';
+          
+          let defaultColor = isODP ? '#f59e0b' : '#8b5cf6';
+          let lineColor = !anyUser ? '#94a3b8' : (isOnline ? defaultColor : '#ef4444');
+          let lineWeight = !anyUser ? 3 : (isOnline ? 4 : 5);
+          let lineDash = !anyUser ? '4,4' : (isOnline ? undefined : '8,6');
+          let labelText = !anyUser ? `Kabel Distribusi ${parent.name} ➔ ${node.name} (Kosong)` : (isOnline ? `Kabel Distribusi ${parent.name} ➔ ${node.name} (Aktif)` : `⚠️ KABEL DISTRIBUSI PUTUS: ${parent.name} ➔ ${node.name}`);
+          let subText = !anyUser ? 'Belum ada pelanggan aktif' : (isOnline ? 'Koneksi optik lancar' : `Semua pelanggan di bawah ${node.name} terputus serentak!`);
+
           lines.push({
             id: `node-${node.id}`,
             coordinates: [[Number(parent.latitude), Number(parent.longitude)], [Number(node.latitude), Number(node.longitude)]],
             type: node.type === 'ODP' ? 'odc-to-odp' : 'node-to-node',
-            color: node.type === 'ODP' ? '#ffc107' : '#198754',
-            weight: node.type === 'ODP' ? 2 : 2,
-            dashArray: node.type === 'ODP' ? '5,5' : undefined,
+            color: lineColor,
+            weight: lineWeight,
+            dashArray: lineDash,
+            label: labelText,
+            sublabel: subText,
           });
         }
       }
@@ -241,20 +354,23 @@ export default function FtthTopologyMap({
       if (user.topologyNodeId) {
         const node = filteredNodes.find(n => n.id === user.topologyNodeId);
         if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
+          const isUserOnline = user.isOnline;
           lines.push({
             id: `client-${user.id}`,
             coordinates: [[Number(node.latitude), Number(node.longitude)], [Number(user.latitude), Number(user.longitude)]],
             type: 'odp-to-client',
-            color: '#dc3545',
-            weight: 1,
-            dashArray: '3,3',
+            color: isUserOnline ? '#10b981' : '#ef4444',
+            weight: isUserOnline ? 3 : 4,
+            dashArray: isUserOnline ? undefined : '6,6',
+            label: isUserOnline ? `Kabel Drop: ${node.name} ➔ ${user.username} (ONLINE)` : `⚠️ KABEL DROP PUTUS / ONT MATI: ${node.name} ➔ ${user.username}`,
+            sublabel: isUserOnline ? `IP: ${user.remoteAddress || '-'}` : 'Pelanggan offline / ONT dimatikan / Kabel drop terputus',
           });
         }
       }
     });
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser]);
 
   // Handle marker click
   const handleMarkerClick = useCallback((entity, type) => {
@@ -271,24 +387,81 @@ export default function FtthTopologyMap({
 
   // Legend component
   const MapLegend = () => (
-    <div className="card border-0 shadow-sm position-absolute" style={{ 
-      bottom: '20px', right: '20px', zIndex: 1000, width: '200px',
-      background: 'white', borderRadius: '8px'
+    <div className="card border-0 shadow position-absolute" style={{ 
+      bottom: '20px', right: '20px', zIndex: 1000, width: '250px',
+      background: 'rgba(255, 255, 255, 0.95)', backdropFilter: 'blur(10px)',
+      borderRadius: '12px', border: '1px solid rgba(0,0,0,0.08)'
     }}>
-      <div className="card-body py-2 px-3">
-        <h6 className="fw-semibold mb-2 small text-muted">Legend</h6>
-        <div className="d-flex flex-column gap-2">
-          {Object.entries(MARKER_CONFIG).map(([key, config]) => (
-            <div key={key} className="d-flex align-items-center gap-2 small">
+      <div className="card-body py-3 px-3" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+        <h6 className="fw-bold mb-3 small text-dark border-bottom pb-2">🗺️ Peta Legend & Status</h6>
+        
+        {/* Section 1: Perangkat & Status */}
+        <div className="mb-3">
+          <span className="text-uppercase fw-bold text-muted d-block mb-2" style={{ fontSize: '10px', letterSpacing: '0.5px' }}>Perangkat / Entitas</span>
+          <div className="d-flex flex-column gap-2">
+            {Object.entries(MARKER_CONFIG)
+              .filter(([key]) => key !== 'splitter')
+              .map(([key, config]) => (
+              <div key={key} className="d-flex align-items-center gap-2 small">
+                <div style={{
+                  width: '20px', height: '20px', borderRadius: '50%',
+                  background: config.color, border: '2px solid white',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.15)', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', color: 'white',
+                  flexShrink: 0
+                }}>
+                  <i className={`bi ${config.icon}`} style={{ fontSize: '10px' }}></i>
+                </div>
+                <span className="text-dark fw-medium small">{config.label}</span>
+              </div>
+            ))}
+            {/* Offline Client Beacon */}
+            <div className="d-flex align-items-center gap-2 small">
               <div style={{
-                width: '16px', height: '16px', borderRadius: '50%',
-                background: config.color, border: '2px solid white',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
-              }} />
-              <span className="text-dark">{config.label}</span>
+                width: '20px', height: '20px', borderRadius: '50%',
+                background: '#ef4444', border: '2px solid white',
+                boxShadow: '0 0 8px rgba(239,68,68,0.8)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', color: 'white',
+                flexShrink: 0
+              }}>
+                <i className="bi bi-pc-display-horizontal" style={{ fontSize: '10px' }}></i>
+              </div>
+              <span className="text-danger fw-bold small">Client Offline (Radar)</span>
             </div>
-          ))}
+          </div>
         </div>
+
+        {/* Section 2: Status Kabel */}
+        <div>
+          <span className="text-uppercase fw-bold text-muted d-block mb-2" style={{ fontSize: '10px', letterSpacing: '0.5px' }}>Status Jalur Kabel</span>
+          <div className="d-flex flex-column gap-2 small">
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '4px', background: '#2563eb', borderRadius: '2px', flexShrink: 0 }}></div>
+              <span className="text-dark small">Kabel Feeder (OLT ➔ ODC)</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '4px', background: '#8b5cf6', borderRadius: '2px', flexShrink: 0 }}></div>
+              <span className="text-dark small">Kabel Sub-ODC (ODC ➔ ODC)</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '4px', background: '#f59e0b', borderRadius: '2px', flexShrink: 0 }}></div>
+              <span className="text-dark small">Kabel Distribusi (ODC ➔ ODP)</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '3px', background: '#10b981', borderRadius: '2px', flexShrink: 0 }}></div>
+              <span className="text-dark small">Kabel Drop (ODP ➔ Client)</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '4px', background: '#ef4444', borderBottom: '2px dashed white', flexShrink: 0 }}></div>
+              <span className="text-danger fw-bold small">⚠️ Kabel Putus / Offline</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <div style={{ width: '24px', height: '3px', background: '#94a3b8', borderBottom: '2px dotted white', flexShrink: 0 }}></div>
+              <span className="text-muted small">Jalur Pasif / Kosong</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -341,7 +514,7 @@ export default function FtthTopologyMap({
               <div className="mb-2"><small className="text-muted">Router</small><br/><strong className="text-dark">{selectedEntity.router?.name || `Router #${selectedEntity.routerId}`}</strong></div>
               <div className="mb-2"><small className="text-muted">Connected Nodes</small><br/><strong className="text-dark">{nodes.filter(n => n.oltPortId === selectedEntity.id).length}</strong></div>
               {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100">
+                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary w-100">
                   <i className="bi bi-map me-1"></i>Open in Google Maps
                 </a>
               )}
@@ -362,7 +535,7 @@ export default function FtthTopologyMap({
                 <div className="mb-2"><small className="text-muted">Distance</small><br/><span className="text-dark">{selectedEntity.distanceMeter} meters</span></div>
               )}
               {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100 mt-2">
+                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary w-100 mt-2">
                   <i className="bi bi-map me-1"></i>Open in Google Maps
                 </a>
               )}
@@ -378,7 +551,7 @@ export default function FtthTopologyMap({
                 <div className="mb-2"><small className="text-muted">Connected To</small><br/><strong className="text-dark">{nodes.find(n => n.id === selectedEntity.topologyNodeId)?.name || `Node #${selectedEntity.topologyNodeId}`}</strong></div>
               )}
               {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100 mt-2">
+                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener noreferrer" className="btn btn-sm btn-outline-primary w-100 mt-2">
                   <i className="bi bi-house me-1"></i>View Customer Location
                 </a>
               )}
@@ -507,17 +680,22 @@ export default function FtthTopologyMap({
     filteredNodes.forEach(node => {
       if (!isValidCoord(node.latitude, node.longitude)) return;
       const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
+      const anyUser = hasAnyUser(node.id);
+      const isFaulty = anyUser && !hasOnlineUser(node.id);
+      const markerColor = isFaulty ? '#ef4444' : config.color;
+
       markers.push(
         <Marker 
-          key={`node-${node.id}`} 
+          key={`node-${node.id}-${markerColor}`} 
           position={[Number(node.latitude), Number(node.longitude)]}
-          icon={createCustomIcon(config.color, config.icon)}
+          icon={createCustomIcon(markerColor, config.icon, isFaulty)}
           eventHandlers={{ click: () => handleMarkerClick(node, 'node') }}
         >
           <Popup minWidth={220}>
             <div className="p-1">
               <strong className="d-block text-dark">{node.name}</strong>
               <span className={`badge ${node.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'} me-1`}>{node.type}</span>
+              {isFaulty && <span className="badge bg-danger">⚠️ Kabel Putus / Total Offline</span>}
               {node.description && <small className="text-muted d-block mt-1">{node.description}</small>}
             </div>
           </Popup>
@@ -528,19 +706,21 @@ export default function FtthTopologyMap({
     // Client markers (only assigned users with location)
     filteredUsers.forEach(user => {
       if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
+      const isOnline = user.isOnline;
+      const markerColor = isOnline ? '#10b981' : '#ef4444';
       markers.push(
         <Marker 
-          key={`client-${user.id}`} 
+          key={`client-${user.id}-${markerColor}`} 
           position={[Number(user.latitude), Number(user.longitude)]}
-          icon={createCustomIcon(MARKER_CONFIG.client.color, MARKER_CONFIG.client.icon)}
+          icon={createCustomIcon(markerColor, MARKER_CONFIG.client.icon, !isOnline)}
           eventHandlers={{ click: () => handleMarkerClick(user, 'client') }}
         >
           <Popup minWidth={200}>
             <div className="p-1">
               <strong className="d-block text-dark">{user.username}</strong>
               <small className="text-muted d-block"><i className="bi bi-pc-display me-1"></i>{user.remoteAddress || 'No IP'}</small>
-              <span className={`badge ${user.isOnline ? 'bg-success' : 'bg-secondary'} mt-1`}>
-                {user.isOnline ? 'Online' : 'Offline'}
+              <span className={`badge ${isOnline ? 'bg-success' : 'bg-danger'} mt-1`}>
+                {isOnline ? 'Online' : 'Offline / Terputus'}
               </span>
             </div>
           </Popup>
@@ -577,7 +757,7 @@ export default function FtthTopologyMap({
         {/* Topology connection lines */}
         {connections.map(line => (
           <Polyline 
-            key={line.id}
+            key={`${line.id}-${line.color}-${line.dashArray || 'solid'}`}
             positions={line.coordinates}
             color={line.color}
             weight={line.weight}
@@ -586,14 +766,23 @@ export default function FtthTopologyMap({
             smoothFactor={0}
             lineCap="round"
             lineJoin="round"
-          />
+          >
+            {line.label && (
+              <Popup>
+                <div className="p-1 text-center" style={{ minWidth: '180px' }}>
+                  <strong style={{ color: line.color === '#adb5bd' ? '#6c757d' : line.color }}>{line.label}</strong>
+                  {line.sublabel && <div className="small text-muted mt-1">{line.sublabel}</div>}
+                </div>
+              </Popup>
+            )}
+          </Polyline>
         ))}
         
         {/* Entity markers */}
         {renderMarkers()}
         
         {/* Auto-fit to bounds */}
-        <FitMapBounds coordinates={allCoordinates} />
+        <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
       </MapContainer>
 
       {/* Overlay Components */}

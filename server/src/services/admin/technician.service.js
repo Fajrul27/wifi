@@ -6,9 +6,9 @@ const prisma = new PrismaClient();
 class TechnicianService {
 
   /* =========================
-     CREATE TEKNISI (ADMIN ONLY)
+     CREATE TEKNISI / USER (ADMIN ONLY)
   ========================= */
-  static async create(adminUser, username, email, password) {
+  static async create(adminUser, username, email, password, role = "TEKNISI") {
     if (adminUser.role !== "ADMIN") {
       throw new Error("Akses ditolak");
     }
@@ -30,17 +30,17 @@ class TechnicianService {
         username,
         email,
         password: hashed,
-        role: "TEKNISI",
+        role,
       },
     });
   }
 
   /* =========================
-     GET ALL TEKNISI
+     GET ALL USERS (EXCEPT MAIN ADMIN)
   ========================= */
   static async getAll() {
     return await prisma.user.findMany({
-      where: { role: "TEKNISI" },
+      where: { role: { not: "ADMIN" } },
       select: {
         id: true,
         username: true,
@@ -52,7 +52,7 @@ class TechnicianService {
   }
 
   /* =========================
-     UPDATE TEKNISI (ADMIN ONLY)
+     UPDATE TEKNISI / USER (ADMIN ONLY)
   ========================= */
   static async update(adminUser, id, data) {
     if (adminUser.role !== "ADMIN") {
@@ -93,6 +93,7 @@ class TechnicianService {
       data: {
         username: data.username,
         email: data.email,
+        ...(data.role && { role: data.role }),
         ...(data.password && {
           password: await bcrypt.hash(data.password, 10),
         }),
