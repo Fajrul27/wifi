@@ -1,0 +1,298 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ======================================================
+// ROLE
+// ======================================================
+
+enum Role {
+  ADMIN
+  TEKNISI
+}
+
+enum PortType {
+  ODC
+  ODP
+}
+
+enum ConnectionType {
+  NONE
+  ODC
+  ODP
+  USER
+}
+
+// ======================================================
+// SPLITTER TYPE
+// ======================================================
+enum SplitRatio {
+  ONE_TO_2
+  ONE_TO_4
+  ONE_TO_8
+  ONE_TO_16
+  ONE_TO_32
+  ONE_TO_64
+}
+
+// ======================================================
+// USER
+// ======================================================
+
+model User {
+  id         Int      @id @default(autoincrement())
+  username   String   @unique
+  email      String   @unique
+  password   String
+  role       Role     @default(ADMIN)
+  isVerified Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+// ======================================================
+// BLACKLIST TOKEN
+// ======================================================
+
+model BlacklistedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+}
+// ======================================================
+// ROUTER (MIKROTIK)
+// ======================================================
+
+model Router {
+  id        Int      @id @default(autoincrement())
+
+  name      String
+  host      String
+  username  String
+  password  String
+  port      Int      @default(8728)
+
+  latitude  Float?
+  longitude Float?
+
+  isOnline  Boolean  @default(false)
+  lastSeen  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // RELATIONS
+  olts            Olt[]
+  pppoeUsers      PppoeUser[]
+  pppoeProfiles   PppoeProfile[]
+
+  @@index([isOnline])
+}
+
+// ======================================================
+// OLT DEVICE
+// ======================================================
+
+model Olt {
+  id         Int      @id @default(autoincrement())
+
+  routerId   Int
+
+  name       String
+
+  latitude   Float
+  longitude  Float
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // RELATIONS
+  router      Router   @relation(fields: [routerId], references: [id], onDelete: Cascade)
+
+  ports       OltPort[]
+}
+
+// ======================================================
+// OLT PORT / PON
+// ======================================================
+
+model OltPort {
+  id        Int @id @default(autoincrement())
+
+  oltId     Int
+  index     Int
+
+  isUsed    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  olt Olt @relation(fields: [oltId], references: [id], onDelete: Cascade)
+
+  odcs Odc[]
+
+  @@unique([oltId, index])
+}
+
+// ======================================================
+// ODC
+// ======================================================
+
+model Odc {
+  id        Int      @id @default(autoincrement())
+
+  // ROOT ODC dari OLT (optional)
+  oltPortId Int?
+
+  // CHILD ODC (tree)
+  parentOdcId Int?
+
+  name      String
+
+  latitude  Float?
+  longitude Float?
+
+  splitRatio SplitRatio
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // RELATION KE OLT (ROOT ONLY)
+  oltPort OltPort? @relation(fields: [oltPortId], references: [id], onDelete: Cascade)
+
+  // SELF RELATION (TREE)
+  parentOdc Odc? @relation("OdcTree", fields: [parentOdcId], references: [id])
+  childOdcs Odc[] @relation("OdcTree")
+
+  ports     OdcPort[]
+  odps      Odp[]
+}
+
+
+
+model OdcPort {
+  id        Int   @id @default(autoincrement())
+
+  odcId     Int
+  index     Int
+
+  isUsed    Boolean @default(false)
+
+  connectionType ConnectionType @default(NONE)
+
+  connectedOdcId Int?
+  connectedOdpId Int?
+
+  createdAt DateTime @default(now())
+
+  odc       Odc @relation(fields: [odcId], references: [id], onDelete: Cascade)
+
+  @@unique([odcId, index])
+}
+
+// ======================================================
+// ODP
+// ======================================================
+
+model Odp {
+  id        Int      @id @default(autoincrement())
+
+  odcId     Int
+
+  name      String
+
+  latitude  Float?
+  longitude Float?
+
+  splitRatio SplitRatio
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  odc       Odc @relation(fields: [odcId], references: [id], onDelete: Cascade)
+
+  ports     OdpPort[]
+
+  @@index([odcId])
+}
+
+model OdpPort {
+  id        Int   @id @default(autoincrement())
+
+  odpId     Int
+
+  index     Int
+  isUsed    Boolean @default(false)
+
+
+  createdAt DateTime @default(now())
+
+  odp       Odp @relation(fields: [odpId], references: [id], onDelete: Cascade)
+  user      PppoeUser?
+  @@unique([odpId, index])
+}
+
+// ======================================================
+// PPPOE CLIENT
+// ======================================================
+
+model PppoeUser {
+  id             Int      @id @default(autoincrement())
+
+  routerId       Int
+  username       String
+
+   odpPortId      Int? @unique
+
+  latitude       Float?
+  longitude      Float?
+
+  isOnline       Boolean  @default(false)
+
+  lastSeen       DateTime?
+  lastDisconnect DateTime?
+
+  localAddress   String?
+  remoteAddress  String?
+  profile        String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  router Router @relation(fields: [routerId], references: [id], onDelete: Cascade)
+
+  odpPort OdpPort? @relation(fields: [odpPortId], references: [id], onDelete: SetNull)
+
+  @@unique([routerId, username])
+  @@index([odpPortId])
+}
+
+
+
+
+model PppoeProfile {
+  id        Int      @id @default(autoincrement())
+
+  routerId  Int
+
+  name      String
+
+  localAddress  String?
+  remoteAddress String?
+  rateLimit     String?
+  burstLimit     String?
+  burstThreshold String?
+  burstTime      String?
+  onlyOne        Boolean?
+  sessionTimeout String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  router Router @relation(fields: [routerId], references: [id], onDelete: Cascade)
+
+  @@unique([routerId, name])
+}
