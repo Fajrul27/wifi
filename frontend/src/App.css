@@ -1,0 +1,28 @@
+
+
+
+
+.app {
+  display: flex;
+}
+
+/* SIDEBAR FIXED */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+}
+
+/* MAIN CONTENT SCROLL ONLY */
+.main {
+  margin-left: 260px;
+  padding: 20px;
+  height: 100vh;
+  overflow-y: auto;
+  background: #f8fafc;
+}
