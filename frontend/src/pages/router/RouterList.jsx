@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../../services/api";
+import MapPicker from "../../components/MapPicker";
 
 export default function Routers() {
   const [data, setData] = useState([]);
@@ -387,6 +388,14 @@ export default function Routers() {
                         onChange={(e) => setForm({ ...form, longitude: e.target.value })}
                       />
                     </div>
+                  </div>
+                  <div className="mt-3">
+                    <MapPicker
+                      lat={form.latitude}
+                      lng={form.longitude}
+                      onChange={(lat, lng) => setForm({ ...form, latitude: lat, longitude: lng })}
+                      height={250}
+                    />
                   </div>
                   <div className="mt-2 p-3 bg-light rounded small text-muted">
                     <i className="bi bi-info-circle me-1"></i>

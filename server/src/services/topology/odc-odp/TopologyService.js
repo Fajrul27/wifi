@@ -1,5 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../../../utils/prisma");
 
 // =====================================================
 // UTIL
@@ -68,13 +67,15 @@ async createOdc(data) {
   // =========================
   const odc = await prisma.$transaction(async (tx) => {
 
+    const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
+
     const created = await tx.odc.create({
       data: {
         name: data.name.trim(),
         oltPortId,
         splitRatio: data.splitRatio,
-        latitude: data.latitude !== undefined ? Number(data.latitude) : null,
-        longitude: data.longitude !== undefined ? Number(data.longitude) : null,
+        latitude: toCoord(data.latitude),
+        longitude: toCoord(data.longitude),
       },
     });
 
@@ -165,19 +166,16 @@ async createOdc(data) {
         throw new Error("Port ODC sudah digunakan");
       }
 
+      const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
+
       const child = await tx.odc.create({
         data: {
           name: data.name.trim(),
-          oltPortId: parent.oltPortId,
+          oltPortId: null,           // Child ODC TIDAK punya oltPortId
+          parentOdcId: parent.id,   // Identifikasi via parentOdcId
           splitRatio: data.splitRatio,
-          latitude:
-            data.latitude !== undefined
-              ? Number(data.latitude)
-              : null,
-          longitude:
-            data.longitude !== undefined
-              ? Number(data.longitude)
-              : null,
+          latitude: toCoord(data.latitude),
+          longitude: toCoord(data.longitude),
         },
       });
 
@@ -215,32 +213,76 @@ async createOdc(data) {
   }
 
   // =====================================================
-  // GET ODC TREE
+  // GET ODC TREE (RECURSIVE)
   // =====================================================
 
- async getOdcTree(oltPortId) {
+  async getOdcTree(oltPortId) {
 
-  const id = toInt(oltPortId, "oltPortId");
+    const id = toInt(oltPortId, "oltPortId");
 
-  return prisma.odc.findMany({
-    where: {
-      oltPortId: id,
-    },
-    include: {
-      ports: true,
+    // Ambil hanya ROOT ODC (yang langsung terhubung ke OLT port)
+    // Child ODC tidak memiliki oltPortId — mereka diidentifikasi via parentOdcId
+    const rootOdcs = await prisma.odc.findMany({
+      where: {
+        oltPortId: id,
+        parentOdcId: null,   // ← pastikan hanya root
+      },
+      include: {
+        ports: { orderBy: { index: "asc" } },
+        odps: {
+          include: {
+            ports: { include: { user: true }, orderBy: { index: "asc" } },
+          },
+        },
+      },
+      orderBy: { id: "asc" },
+    });
 
-      odps: {
-        include: {
-          ports: {
-            include: {
-              user: true   // 🔥 INI WAJIB
-            }
-          }
+    // Ambil semua ODC lain via parentOdcId (rekursif)
+    const buildSubtree = async (odcList) => {
+      const result = [];
+      for (const odc of odcList) {
+        const children = await prisma.odc.findMany({
+          where: { parentOdcId: odc.id },
+          include: {
+            ports: { orderBy: { index: "asc" } },
+            odps: {
+              include: {
+                ports: { include: { user: true }, orderBy: { index: "asc" } },
+              },
+            },
+          },
+          orderBy: { id: "asc" },
+        });
+        const childrenWithSub = await buildSubtree(children);
+
+        // Kumpulkan connectedOdpId dari ports
+        const odpIds = odc.ports
+          .filter(p => p.connectionType === "ODP" && p.connectedOdpId)
+          .map(p => p.connectedOdpId);
+
+        let odpMap = {};
+        if (odpIds.length > 0) {
+          const odps = await prisma.odp.findMany({
+            where: { id: { in: odpIds } },
+            include: { ports: { include: { user: true }, orderBy: { index: "asc" } } },
+          });
+          for (const odp of odps) odpMap[odp.id] = odp;
         }
+
+        for (const port of odc.ports) {
+          port.connectedOdp = (port.connectionType === "ODP" && port.connectedOdpId)
+            ? (odpMap[port.connectedOdpId] ?? null)
+            : null;
+        }
+
+        result.push({ ...odc, children: childrenWithSub });
       }
-    },
-  });
-}
+      return result;
+    };
+
+    return buildSubtree(rootOdcs);
+  }
 
   // =====================================================
   // UPDATE ODC
@@ -308,20 +350,17 @@ async createOdc(data) {
         });
       }
 
+      const toCoordUpdate = (v) =>
+        v === undefined ? undefined : (v === null || v === "" ? null : Number(v));
+
       return tx.odc.update({
         where: {
           id: odcId,
         },
         data: {
           name: data.name?.trim(),
-          latitude:
-            data.latitude !== undefined
-              ? Number(data.latitude)
-              : undefined,
-          longitude:
-            data.longitude !== undefined
-              ? Number(data.longitude)
-              : undefined,
+          latitude: toCoordUpdate(data.latitude),
+          longitude: toCoordUpdate(data.longitude),
           splitRatio: data.splitRatio,
         },
       });
@@ -339,28 +378,20 @@ async createOdc(data) {
   return prisma.$transaction(async (tx) => {
 
     const odc = await tx.odc.findUnique({
-      where: {
-        id: odcId,
-      },
-      include: {
-        ports: true,
-      },
+      where: { id: odcId },
+      include: { ports: true },
     });
 
     if (!odc) {
       throw new Error("ODC tidak ditemukan");
     }
 
-    const hasUsedPort = odc.ports.some(
-      (p) => p.isUsed
-    );
+    const hasUsedPort = odc.ports.some((p) => p.isUsed);
 
     const userCount = await tx.pppoeUser.count({
       where: {
         odpPort: {
-          odp: {
-            odcId,
-          },
+          odp: { odcId },
         },
       },
     });
@@ -370,22 +401,18 @@ async createOdc(data) {
     }
 
     // =====================================================
-    // 🔥 FIX: RELEASE PARENT OLT PORT
+    // RELEASE PARENT OLT PORT (hanya untuk root ODC)
     // =====================================================
-    await tx.oltPort.update({
-      where: {
-        id: odc.oltPortId,
-      },
-      data: {
-        isUsed: false,
-      },
-    });
+    if (odc.oltPortId) {
+      await tx.oltPort.update({
+        where: { id: odc.oltPortId },
+        data: { isUsed: false },
+      });
+    }
 
-    // release parent link (child ODC reference)
+    // Release parent ODC port yang mereferensikan ODC ini (untuk child ODC)
     await tx.odcPort.updateMany({
-      where: {
-        connectedOdcId: odcId,
-      },
+      where: { connectedOdcId: odcId },
       data: {
         isUsed: false,
         connectionType: "NONE",
@@ -394,15 +421,11 @@ async createOdc(data) {
     });
 
     await tx.odcPort.deleteMany({
-      where: {
-        odcId,
-      },
+      where: { odcId },
     });
 
     return tx.odc.delete({
-      where: {
-        id: odcId,
-      },
+      where: { id: odcId },
     });
   });
 }
@@ -463,19 +486,15 @@ async createOdc(data) {
     // =====================================================
     // CREATE ODP
     // =====================================================
+    const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
+
     const odp = await tx.odp.create({
       data: {
         name: data.name.trim(),
         odcId,
         splitRatio: data.splitRatio,
-        latitude:
-          data.latitude !== undefined
-            ? Number(data.latitude)
-            : null,
-        longitude:
-          data.longitude !== undefined
-            ? Number(data.longitude)
-            : null,
+        latitude: toCoord(data.latitude),
+        longitude: toCoord(data.longitude),
       },
     });
 
@@ -508,8 +527,11 @@ async createOdc(data) {
     return tx.odp.findUnique({
       where: { id: odp.id },
       include: {
-        odcs: true,
-        ports: true,
+        odc: true,
+        ports: {
+          include: { user: true },
+          orderBy: { index: "asc" }
+        },
       },
     });
   });
@@ -581,25 +603,25 @@ async createOdc(data) {
         });
       }
 
+      const toCoordUpdate = (v) =>
+        v === undefined ? undefined : (v === null || v === "" ? null : Number(v));
+
       return tx.odp.update({
         where: {
           id: odpId,
         },
         data: {
           name: data.name?.trim(),
-          latitude:
-            data.latitude !== undefined
-              ? Number(data.latitude)
-              : undefined,
-          longitude:
-            data.longitude !== undefined
-              ? Number(data.longitude)
-              : undefined,
+          latitude: toCoordUpdate(data.latitude),
+          longitude: toCoordUpdate(data.longitude),
           splitRatio: data.splitRatio,
         },
         include: {
-          odcs: true,
-          ports: true,
+          odc: true,
+          ports: {
+            include: { user: true },
+            orderBy: { index: "asc" }
+          },
         },
       });
     });
@@ -618,8 +640,11 @@ async createOdc(data) {
         id: odpId,
       },
       include: {
-        odcs: true,
-        ports: true,
+        odc: true,
+        ports: {
+          include: { user: true },
+          orderBy: { index: "asc" }
+        },
       },
     });
 
@@ -783,8 +808,11 @@ async getOdpsByPort(portId) {
       id: port.connectedOdpId,
     },
     include: {
-      ports: true,
-      odcs: true,
+      ports: {
+        include: { user: true },
+        orderBy: { index: "asc" }
+      },
+      odc: true,
     },
   });
 

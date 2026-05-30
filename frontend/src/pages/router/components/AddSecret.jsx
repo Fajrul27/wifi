@@ -379,33 +379,19 @@ export default function AddSecret({
         }
       >
         <div
-          className="modal-content"
+          className="modal-content bg-body text-body border shadow"
           style={{
             borderRadius: 4,
-            border:
-              "1px solid #9fa7b1",
             overflow: "hidden",
-            boxShadow:
-              "0 4px 16px rgba(0,0,0,0.25)",
             fontSize: 12,
           }}
         >
           {/* HEADER */}
           <div
-            className="d-flex justify-content-between align-items-center px-3"
-            style={{
-              height: 34,
-              background:
-                "linear-gradient(#fdfdfd,#dcdcdc)",
-              borderBottom:
-                "1px solid #b8b8b8",
-            }}
+            className="d-flex justify-content-between align-items-center px-3 py-2 bg-body-tertiary border-bottom"
           >
             <div
-              style={{
-                fontWeight: 600,
-                color: "#222",
-              }}
+              className="fw-semibold text-body-emphasis"
             >
               New PPP Secret
             </div>
@@ -422,11 +408,7 @@ export default function AddSecret({
 
           {/* BODY */}
           <div
-            className="p-3"
-            style={{
-              background:
-                "#ececec",
-            }}
+            className="p-3 bg-body"
           >
             {/* ENABLED */}
             <div className="row mb-2 align-items-center">
@@ -763,13 +745,7 @@ export default function AddSecret({
 
           {/* FOOTER */}
           <div
-            className="px-3 py-2 d-flex justify-content-end gap-2"
-            style={{
-              background:
-                "#dfdfdf",
-              borderTop:
-                "1px solid #bdbdbd",
-            }}
+            className="px-3 py-2 d-flex justify-content-end gap-2 bg-body-tertiary border-top"
           >
             <button
               className="btn btn-sm btn-light"

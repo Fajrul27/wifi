@@ -296,3 +296,14 @@ model PppoeProfile {
 
   @@unique([routerId, name])
 }
+
+// ======================================================
+// SYSTEM LOGS
+// ======================================================
+
+model SystemLog {
+  id        Int      @id @default(autoincrement())
+  message   String
+  type      String   @default("info") // "info", "success", "warning", "danger"
+  createdAt DateTime @default(now())
+}

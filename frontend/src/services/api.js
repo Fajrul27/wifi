@@ -4,6 +4,11 @@ const api = axios.create({
  baseURL: "http://localhost:3000/api",
    withCredentials: true,
   timeout: 15000, // 🔥 penting biar tidak hanging request
+  headers: {
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  }
 });
 
 /* =========================

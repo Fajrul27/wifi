@@ -77,7 +77,8 @@ CREATE TABLE "OltPort" (
 -- CreateTable
 CREATE TABLE "Odc" (
     "id" SERIAL NOT NULL,
-    "oltPortId" INTEGER NOT NULL,
+    "oltPortId" INTEGER,
+    "parentOdcId" INTEGER,
     "name" TEXT NOT NULL,
     "latitude" DOUBLE PRECISION,
     "longitude" DOUBLE PRECISION,
@@ -182,12 +183,6 @@ CREATE INDEX "Router_isOnline_idx" ON "Router"("isOnline");
 CREATE UNIQUE INDEX "OltPort_oltId_index_key" ON "OltPort"("oltId", "index");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Odc_oltPortId_key" ON "Odc"("oltPortId");
-
--- CreateIndex
-CREATE INDEX "Odc_oltPortId_idx" ON "Odc"("oltPortId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "OdcPort_odcId_index_key" ON "OdcPort"("odcId", "index");
 
 -- CreateIndex
@@ -216,6 +211,9 @@ ALTER TABLE "OltPort" ADD CONSTRAINT "OltPort_oltId_fkey" FOREIGN KEY ("oltId") 
 
 -- AddForeignKey
 ALTER TABLE "Odc" ADD CONSTRAINT "Odc_oltPortId_fkey" FOREIGN KEY ("oltPortId") REFERENCES "OltPort"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Odc" ADD CONSTRAINT "Odc_parentOdcId_fkey" FOREIGN KEY ("parentOdcId") REFERENCES "Odc"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OdcPort" ADD CONSTRAINT "OdcPort_odcId_fkey" FOREIGN KEY ("odcId") REFERENCES "Odc"("id") ON DELETE CASCADE ON UPDATE CASCADE;

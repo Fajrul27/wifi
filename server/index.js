@@ -13,6 +13,7 @@ BigInt.prototype.toJSON = function () {
   return this.toString();
 };
 
+
 /* =========================
    ROUTES
 ========================= */
@@ -23,6 +24,8 @@ const pppoeUser = require("./src/routes/admin/pppoe");
 const monitoring = require("./src/routes/admin/monitoring");
 const oltRoutes  = require('./src/routes/topology/olt/olt.routes');
 const topology  = require('./src/routes/topology/odc-odp/topology.routs');
+const oltPortRoutes = require('./src/routes/topology/oltPort.routes');
+const splitterRoutes = require('./src/routes/topology/splitter.routes');
 
 
 /* =========================
@@ -75,6 +78,11 @@ app.use("/api/pppoe", pppoeUser);
 app.use("/api/monitoring", monitoring);
 app.use("/api/olts", oltRoutes);
 app.use('/api/topology', topology);
+app.use("/api/olt-ports", oltPortRoutes);
+app.use("/api/splitter", splitterRoutes);
+
+const logRoutes = require("./src/routes/admin/log.route");
+app.use("/api/logs", logRoutes);
 /* =========================
    SOCKET INIT (SAFE)
 ========================= */

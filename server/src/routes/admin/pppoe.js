@@ -74,7 +74,17 @@ router.post(
   controller.addUser
 );
 
+// edit user
+router.put(
+  "/:routerId/user/:username",
+  controller.updateUser
+);
 
+// kick user
+router.post(
+  "/:routerId/user/:username/kick",
+  controller.kickUser
+);
 
 // delete user
 router.delete(

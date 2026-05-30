@@ -1,6 +1,4 @@
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient();
+const prisma = require("../../../utils/prisma");
 
 class OltService {
 
@@ -86,7 +84,7 @@ class OltService {
 
         ports: {
           include: {
-            odcs: true,
+            _count: { select: { odcs: true } },
           },
         },
 
@@ -204,7 +202,7 @@ async addPorts(oltId, data) {
 
       ports: {
         include: {
-          odcs: true,
+          _count: { select: { odcs: true } },
         },
 
         orderBy: {
@@ -251,7 +249,7 @@ async addPorts(oltId, data) {
     // CHECK USED
     // =====================================================
 
-    if (port.odc) {
+    if (port.odcs && port.odcs.length > 0) {
       throw new Error(
         `Port ${port.index} sedang digunakan topology`
       );
@@ -381,7 +379,13 @@ async addPorts(oltId, data) {
 
         ports: {
           include: {
-            odcs: true,
+            // Hanya perlu tahu apakah port sudah digunakan (untuk badge Terpakai)
+            // Tree detail dimuat terpisah via getOdcTree
+            _count: {
+              select: {
+                odcs: true,
+              },
+            },
           },
 
           orderBy: {
@@ -530,7 +534,7 @@ async addPorts(oltId, data) {
     // =====================================================
 
     const usedPort = olt.ports.find(
-      (port) => port.odc
+      (port) => port.odcs && port.odcs.length > 0
     );
 
     if (usedPort) {
@@ -581,7 +585,7 @@ async addPorts(oltId, data) {
     for (const olt of olts) {
 
       const usedPort = olt.ports.find(
-        (port) => port.odc
+        (port) => port.odcs && port.odcs.length > 0
       );
 
       if (usedPort) {
@@ -635,7 +639,7 @@ async addPorts(oltId, data) {
     const totalPorts = olt.ports.length;
 
     const usedPorts = olt.ports.filter(
-      (port) => port.odc
+      (port) => port.odcs && port.odcs.length > 0
     ).length;
 
     const unusedPorts = totalPorts - usedPorts;

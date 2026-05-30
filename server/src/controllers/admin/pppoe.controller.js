@@ -1,6 +1,6 @@
 const PppoeService = require("../../services/admin/PppoeService");
-
 const prisma = require("../../utils/prisma");
+const { getRoadRoute } = require("../../utils/routing");
 
 const services = {};
 
@@ -45,9 +45,27 @@ function formatBandwidth(
     i++;
   }
 
-  return `${num.toFixed(2)} ${
-    units[i]
-  }`;
+  return `${num.toFixed(2)} ${units[i]
+    }`;
+}
+
+/* =========================
+   FORMAT DURATION
+========================= */
+function formatDuration(ms = 0) {
+  const sec = Math.floor(ms / 1000);
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+
+  let out = "";
+  if (d) out += `${d}d `;
+  if (h) out += `${h}h `;
+  if (m) out += `${m}m `;
+  if (s || !out) out += `${s}s`;
+
+  return out.trim();
 }
 
 /* =========================
@@ -72,6 +90,8 @@ const getService = (router) => {
     services[router.id] =
       new PppoeService(router);
   }
+
+  services[router.id].startAutoRealtime();
 
   return services[router.id];
 };
@@ -207,7 +227,9 @@ controller.getUsers =
             where: {
               routerId,
             },
-
+            include: {
+              odpPort: true,
+            },
             orderBy: {
               username:
                 "asc",
@@ -228,35 +250,61 @@ controller.getUsers =
         ] = a;
       }
 
+      // Fetch secrets to get disabled status
+      const secrets = await service.getUsers();
+      const secretMap = {};
+      for (const s of secrets || []) {
+        secretMap[normalizeKey(s.name)] = s;
+      }
+
+      const activeInterfaces = [];
+      for (const a of activeUsers) {
+        const iface = a.interface || `<pppoe-${a.name}>`;
+        if (iface) {
+          activeInterfaces.push(iface);
+        }
+      }
+
+      const trafficMap = await service.getMultipleInterfacesTraffic(activeInterfaces);
+
+      const odps = await prisma.odp.findMany();
       const result = [];
+      const routeTasks = [];
 
       for (const u of users) {
         const active =
           activeMap[
-            normalizeKey(
-              u.username
-            )
+          normalizeKey(
+            u.username
+          )
           ];
+
+        const secret = secretMap[normalizeKey(u.username)];
+        const disabled = secret ? (secret.disabled === "true" || secret.disabled === "yes" || secret.disabled === true) : false;
 
         let rx = 0;
         let tx = 0;
 
         if (active) {
-          const iface =
-            active.interface ||
-            `<pppoe-${u.username}>`;
-
-          const t =
-            await service.getInterfaceTraffic(
-              iface
-            );
-
-          rx = t.rx;
-          tx = t.tx;
+          const iface = active.interface || `<pppoe-${active.name}>`;
+          if (iface && trafficMap[iface]) {
+            rx = trafficMap[iface].rx;
+            tx = trafficMap[iface].tx;
+          }
         }
 
-        result.push({
+        let downtime = null;
+        if (!active) {
+          const baseTime = u.lastSeen || u.createdAt;
+          if (baseTime) {
+            const diff = Date.now() - new Date(baseTime).getTime();
+            downtime = formatDuration(diff);
+          }
+        }
+
+        const userObj = {
           id: u.id,
+          routerId: u.routerId,
 
           username:
             u.username,
@@ -267,18 +315,20 @@ controller.getUsers =
           isOnline:
             !!active,
 
+          disabled,
+
           uptime:
             active?.uptime ||
             null,
+
+          downtime,
 
           localAddress:
             active?.address ||
             null,
 
           remoteAddress:
-            active?.[
-              "remote-address"
-            ] || null,
+            active?.address || null,
 
           rxRaw: rx,
           txRaw: tx,
@@ -303,8 +353,28 @@ controller.getUsers =
           longitude:
             u.longitude ??
             null,
-        });
+
+          topologyNodeId: u.odpPort?.odpId ? (u.odpPort.odpId + 100000) : null,
+          roadCoordinates: null
+        };
+
+        if (u.odpPort?.odpId && u.latitude !== null && u.longitude !== null) {
+          const odp = odps.find(o => o.id === u.odpPort.odpId);
+          if (odp && odp.latitude !== null && odp.longitude !== null) {
+            routeTasks.push(async () => {
+              userObj.roadCoordinates = await getRoadRoute(
+                Number(odp.latitude), Number(odp.longitude),
+                Number(u.latitude), Number(u.longitude)
+              );
+            });
+          }
+        }
+
+        result.push(userObj);
       }
+
+      // Execute routing calls in parallel (controlled by getRoadRoute throttle)
+      await Promise.all(routeTasks.map(t => t()));
 
       res.json({
         success: true,
@@ -454,7 +524,7 @@ controller.updateLocation =
       ) {
         service
           .updateRealtime()
-          .catch(() => {});
+          .catch(() => { });
       }
 
       res.json({
@@ -547,31 +617,31 @@ controller.getInterfaceStats =
 
             rxBps: Number(
               x[
-                "rx-bits-per-second"
+              "rx-bits-per-second"
               ] || 0
             ),
 
             txBps: Number(
               x[
-                "tx-bits-per-second"
+              "tx-bits-per-second"
               ] || 0
             ),
 
             rxHuman:
               formatBandwidth(
                 x[
-                  "rx-bits-per-second"
+                "rx-bits-per-second"
                 ] || 0
               ),
 
             txHuman:
               formatBandwidth(
                 x[
-                  "tx-bits-per-second"
+                "tx-bits-per-second"
                 ] || 0
               ),
           });
-        } catch {}
+        } catch { }
       }
 
       res.json({
@@ -587,15 +657,188 @@ controller.getInterfaceStats =
   };
 
 /* =========================
+   UPDATE USER
+========================= */
+controller.updateUser = async (req, res) => {
+  try {
+    const router = await getRouter(Number(req.params.routerId));
+    const service = getService(router);
+    await service.connect();
+
+    const username = req.params.username;
+
+    // Get the .id of the user in MikroTik
+    const secrets = await service.write("/ppp/secret/print", [
+      `?name=${username}`,
+    ]);
+    const secret = secrets?.[0];
+    if (!secret) {
+      return res.status(404).json({ success: false, message: "User tidak ditemukan di Mikrotik" });
+    }
+
+    const supportedKeys = await service.getSupportedKeys();
+
+    // Update in MikroTik
+    const params = [`=.id=${secret[".id"]}`];
+    
+    if (req.body.password !== undefined) params.push(`=password=${req.body.password}`);
+    if (req.body.profile !== undefined) params.push(`=profile=${req.body.profile}`);
+    if (req.body.comment !== undefined) params.push(`=comment=${req.body.comment}`);
+    if (req.body.disabled !== undefined) {
+      params.push(`=disabled=${req.body.disabled ? "yes" : "no"}`);
+    }
+
+    const addParam = (apiKey, bodyValue, isNumber = false) => {
+      if (bodyValue !== undefined && supportedKeys.includes(apiKey)) {
+        if (isNumber) {
+          const val = String(bodyValue).trim();
+          if (val !== "") {
+            params.push(`=${apiKey}=${val}`);
+          }
+        } else {
+          params.push(`=${apiKey}=${bodyValue}`);
+        }
+      }
+    };
+
+    addParam("service", req.body.service);
+    addParam("local-address", req.body["local-address"]);
+    addParam("remote-address", req.body["remote-address"]);
+    addParam("caller-id", req.body["caller-id"]);
+    addParam("routes", req.body.routes);
+    addParam("limit-bytes-in", req.body["limit-bytes-in"], true);
+    addParam("limit-bytes-out", req.body["limit-bytes-out"], true);
+    
+    // Only pass if supported
+    if (req.body["only-one"] !== undefined && supportedKeys.includes("only-one")) {
+      params.push(`=only-one=${req.body["only-one"] ? "yes" : "no"}`);
+    }
+    addParam("rate-limit", req.body["rate-limit"]);
+    addParam("address-list", req.body["address-list"]);
+    addParam("remote-ipv6-prefix-pool", req.body["remote-ipv6-prefix-pool"]);
+
+    await service.write("/ppp/secret/set", params);
+
+    // Terminate session if changed
+    if (
+      req.body.profile !== undefined ||
+      req.body["remote-address"] !== undefined ||
+      req.body["local-address"] !== undefined ||
+      req.body.disabled === true
+    ) {
+      const actives = await service.write("/ppp/active/print", [
+        `?name=${username}`,
+      ]);
+      const active = actives?.[0];
+      if (active) {
+        await service.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
+      }
+    }
+
+    // Update in database cache
+    const dbUpdateData = {};
+    if (req.body.profile !== undefined) dbUpdateData.profile = req.body.profile;
+    if (req.body["local-address"] !== undefined) dbUpdateData.localAddress = req.body["local-address"] || null;
+    if (req.body["remote-address"] !== undefined) dbUpdateData.remoteAddress = req.body["remote-address"] || null;
+
+    const dbUser = await prisma.pppoeUser.findUnique({
+      where: {
+        routerId_username: {
+          routerId: router.id,
+          username,
+        },
+      },
+    });
+
+    if (dbUser) {
+      await prisma.pppoeUser.update({
+        where: {
+          id: dbUser.id,
+        },
+        data: dbUpdateData,
+      });
+    }
+
+    service.clearCache();
+
+    // Log the action
+    const LogService = require("../../services/admin/LogService");
+    if (req.body.disabled !== undefined) {
+      await LogService.addLog(`User ${username} was ${req.body.disabled ? 'disabled' : 'enabled'} by admin`, req.body.disabled ? 'warning' : 'success');
+    } else {
+      await LogService.addLog(`User ${username} profile/settings updated by admin`, 'info');
+    }
+
+    res.json({ success: true, message: "User berhasil diperbarui" });
+  } catch (error) {
+    console.error("[PPPoE Controller] Failed to update user:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =========================
+   KICK USER SESSION
+========================= */
+controller.kickUser = async (req, res) => {
+  try {
+    const router = await getRouter(Number(req.params.routerId));
+    const service = getService(router);
+    await service.connect();
+
+    const username = req.params.username;
+
+    const actives = await service.write("/ppp/active/print", [
+      `?name=${username}`,
+    ]);
+    const active = actives?.[0];
+
+    if (!active) {
+      return res.status(404).json({ success: false, message: "Session tidak ditemukan (mungkin sudah offline)" });
+    }
+
+    await service.write("/ppp/active/remove", [`=.id=${active[".id"]}`]);
+
+    service.clearCache();
+
+    // Log the action
+    const LogService = require("../../services/admin/LogService");
+    await LogService.addLog(`User session ${username} was reconnected by admin`, 'info');
+
+    res.json({ success: true, message: "Session berhasil diputus" });
+  } catch (error) {
+    console.error("[PPPoE Controller] Failed to kick user:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* =========================
+   CLEAR SERVICE CACHE
+========================= */
+controller.clearService = (routerId) => {
+  const service = services[routerId];
+  if (service) {
+    try {
+      if (service.client) {
+        service.client.close().catch(() => {});
+      }
+      service.isConnected = false;
+    } catch (e) {
+      console.error("[SERVICE CLEAR ERROR]", e);
+    }
+    delete services[routerId];
+  }
+};
+
+/* =========================
    REALTIME STATUS
 ========================= */
 controller.getRealtimeStatus =
   (req, res) => {
     const service =
       services[
-        Number(
-          req.params.routerId
-        )
+      Number(
+        req.params.routerId
+      )
       ];
 
     res.json({

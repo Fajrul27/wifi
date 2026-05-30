@@ -71,7 +71,7 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
     let reconnect;
 
     const connect = () => {
-      ws = new WebSocket("ws://localhost:5000");
+      ws = new WebSocket("ws://localhost:5050");
       wsRef.current = ws;
 
       ws.onopen = () => setSocketConnected(true);

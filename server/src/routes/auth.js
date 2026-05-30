@@ -2,8 +2,8 @@ const express = require("express");
 const router = express.Router();
 
 const AuthController = require("../controllers/auth.controller");
-const authMiddleware = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const authMiddleware = require("../Middleware/auth.middleware");
+const authorize = require("../Middleware/role.middleware");
 
 /* =========================
    AUTH BASIC

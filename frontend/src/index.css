@@ -31,12 +31,12 @@ code {
 
 /* Table hover with theme background */
 .table tbody tr:hover {
-  background-color: #f8f9fa !important;
+  background-color: rgba(var(--bs-emphasis-color-rgb), 0.05) !important;
 }
 
 /* Subtle border for cards */
 .card.border-0.shadow-sm {
-  border: 1px solid rgba(0, 0, 0, 0.04) !important;
+  border: 1px solid var(--bs-border-color) !important;
 }
 
 /* Form control focus with theme color */
@@ -44,4 +44,729 @@ code {
 .form-select:focus {
   border-color: #ffc107;
   box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25);
+}
+
+/* =============================================================
+   GLOBAL DARK MODE — uses html.dark-mode class (set by AdminLayout)
+   Works independently of Bootstrap CDN version.
+   Colors: #1e2227 bg-primary, #252a30 bg-card, #dee2e6 text
+   ============================================================= */
+
+/* ── 0. CSS Variables when dark ─────────────────────────────── */
+html.dark-mode {
+  --dm-bg:        #1a1e23;
+  --dm-bg-card:   #22272d;
+  --dm-bg-input:  #2b3035;
+  --dm-bg-hover:  rgba(255,255,255,0.06);
+  --dm-text:      #dee2e6;
+  --dm-text-muted: #8b929a;
+  --dm-border:    #373d44;
+}
+
+/* ── 1. Body & layout ───────────────────────────────────────── */
+html.dark-mode body,
+html.dark-mode .content {
+  background-color: var(--dm-bg) !important;
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .bg-body-secondary,
+html.dark-mode .layout {
+  background-color: var(--dm-bg) !important;
+}
+
+/* ── 2. All white backgrounds → dark card ───────────────────── */
+html.dark-mode .bg-white,
+html.dark-mode .card,
+html.dark-mode .card-header,
+html.dark-mode .card-body,
+html.dark-mode .card-footer,
+html.dark-mode .bg-body,
+html.dark-mode .bg-light {
+  background-color: var(--dm-bg-card) !important;
+  color: var(--dm-text) !important;
+  border-color: var(--dm-border) !important;
+}
+
+/* ── 3. Text ────────────────────────────────────────────────── */
+html.dark-mode .text-dark,
+html.dark-mode .text-body-emphasis,
+html.dark-mode h1, html.dark-mode h2,
+html.dark-mode h3, html.dark-mode h4,
+html.dark-mode h5, html.dark-mode h6,
+html.dark-mode label,
+html.dark-mode span:not(.badge),
+html.dark-mode p, html.dark-mode small,
+html.dark-mode li, html.dark-mode td,
+html.dark-mode th, html.dark-mode a:not(.btn) {
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .text-muted,
+html.dark-mode .text-secondary {
+  color: var(--dm-text-muted) !important;
+}
+
+html.dark-mode a:not(.btn):hover {
+  color: #adb5bd !important;
+}
+
+/* ── 4. Tables ──────────────────────────────────────────────── */
+html.dark-mode .table {
+  background-color: var(--dm-bg-card) !important;
+  color: var(--dm-text) !important;
+  border-color: var(--dm-border) !important;
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--dm-text);
+}
+
+html.dark-mode .table th,
+html.dark-mode .table td {
+  border-color: var(--dm-border) !important;
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .table thead th {
+  color: var(--dm-text-muted) !important;
+  background-color: var(--dm-bg) !important;
+}
+
+html.dark-mode .table tbody tr:hover td {
+  background-color: var(--dm-bg-hover) !important;
+}
+
+html.dark-mode .table-responsive {
+  background-color: var(--dm-bg-card) !important;
+}
+
+/* ── 5. Forms & Inputs ──────────────────────────────────────── */
+html.dark-mode .form-control,
+html.dark-mode .form-select,
+html.dark-mode .input-group-text,
+html.dark-mode textarea {
+  background-color: var(--dm-bg-input) !important;
+  border-color: var(--dm-border) !important;
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .form-control::placeholder,
+html.dark-mode textarea::placeholder {
+  color: #6c757d !important;
+}
+
+html.dark-mode .form-control:focus,
+html.dark-mode .form-select:focus,
+html.dark-mode textarea:focus {
+  background-color: #343a40 !important;
+  border-color: #ffc107 !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.2) !important;
+}
+
+html.dark-mode select,
+html.dark-mode select option,
+html.dark-mode .form-select option {
+  background-color: var(--dm-bg-card) !important;
+  color: var(--dm-text) !important;
+}
+
+/* Strip border/shadow on focus for borderless selects */
+select.border-0:focus,
+select.shadow-none:focus,
+.form-select.border-0:focus,
+.form-select.shadow-none:focus,
+html.dark-mode select.border-0:focus,
+html.dark-mode select.shadow-none:focus,
+html.dark-mode .form-select.border-0:focus,
+html.dark-mode .form-select.shadow-none:focus {
+  border: 0 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+html.dark-mode .shadow-sm,
+html.dark-mode .shadow {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+}
+
+html.dark-mode .form-check-input {
+  background-color: var(--dm-bg-input) !important;
+  border-color: var(--dm-border) !important;
+}
+
+html.dark-mode .form-check-input:checked {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+}
+
+html.dark-mode .form-label {
+  color: var(--dm-text) !important;
+}
+
+/* ── 6. Borders ─────────────────────────────────────────────── */
+html.dark-mode .border,
+html.dark-mode .border-bottom,
+html.dark-mode .border-top,
+html.dark-mode .border-start,
+html.dark-mode .border-end {
+  border-color: var(--dm-border) !important;
+}
+
+html.dark-mode .card.border-0.shadow-sm {
+  border: 1px solid var(--dm-border) !important;
+}
+
+/* ── 7. Modals ──────────────────────────────────────────────── */
+html.dark-mode .modal-content {
+  background-color: var(--dm-bg-card) !important;
+  border-color: var(--dm-border) !important;
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .modal-header,
+html.dark-mode .modal-footer {
+  border-color: var(--dm-border) !important;
+  background-color: var(--dm-bg-card) !important;
+}
+
+html.dark-mode .modal-backdrop {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* ── 8. Dropdowns ───────────────────────────────────────────── */
+html.dark-mode .dropdown-menu {
+  background-color: var(--dm-bg-card) !important;
+  border-color: var(--dm-border) !important;
+}
+
+html.dark-mode .dropdown-item {
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .dropdown-item:hover,
+html.dark-mode .dropdown-item:focus {
+  background-color: var(--dm-bg-hover) !important;
+  color: #fff !important;
+}
+
+html.dark-mode .dropdown-divider {
+  border-color: var(--dm-border) !important;
+}
+
+/* ── 9. Buttons (keep colors mostly, just adjust outlines) ──── */
+html.dark-mode .btn-outline-secondary {
+  color: #adb5bd !important;
+  border-color: var(--dm-border) !important;
+}
+
+html.dark-mode .btn-outline-secondary:hover {
+  background-color: var(--dm-bg-hover) !important;
+}
+
+html.dark-mode .btn-light {
+  background-color: var(--dm-bg-input) !important;
+  color: var(--dm-text) !important;
+  border-color: var(--dm-border) !important;
+}
+
+/* ── 10. Badges & Pills ─────────────────────────────────────── */
+html.dark-mode .badge.bg-light,
+html.dark-mode .badge.text-dark {
+  background-color: var(--dm-bg-input) !important;
+  color: var(--dm-text) !important;
+}
+
+/* ── 11. Alerts ─────────────────────────────────────────────── */
+html.dark-mode .alert {
+  border-color: var(--dm-border) !important;
+  color: var(--dm-text) !important;
+}
+
+/* ── 12. Leaflet map ────────────────────────────────────────── */
+html.dark-mode .leaflet-container {
+  background: #1a1d20 !important;
+}
+
+.leaflet-control-layers-list label {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.leaflet-control-layers-selector {
+  accent-color: var(--bs-primary, #3b82f6) !important;
+  margin-right: 6px !important;
+  cursor: pointer !important;
+}
+
+/* ── 13. Custom page sections ───────────────────────────────── */
+html.dark-mode .topbar {
+  background-color: #141821 !important;
+}
+
+/* Recharts dark mode */
+html.dark-mode .recharts-cartesian-axis-tick-value,
+html.dark-mode .recharts-legend-item-text {
+  fill: var(--dm-text-muted) !important;
+}
+
+/* SweetAlert2 dark mode */
+html.dark-mode .swal2-popup {
+  background-color: var(--dm-bg-card) !important;
+  color: var(--dm-text) !important;
+}
+
+html.dark-mode .swal2-title,
+html.dark-mode .swal2-html-container {
+  color: var(--dm-text) !important;
+}
+
+/* ── 14. Smooth transitions (only when NOT in a view transition) ─── */
+body, .layout, .sidebar, .content, .container-fluid,
+.card, .card-header, .card-body, .card-footer,
+.form-control, .form-select, .modal-content, .dropdown-menu,
+.table, .table td, .table th, .table thead th {
+  transition:
+    background-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* During active View Transition: kill ALL CSS transitions & animations
+   so they don't fight the clip-path animation and cause jank/flash */
+html:active-view-transition *,
+html:active-view-transition ::before,
+html:active-view-transition ::after {
+  transition: none !important;
+  animation: none !important;
+  animation-duration: 0s !important;
+}
+
+/* No transition on fast-changing / animated elements (always) */
+.ticker-content, .leaflet-tile, .leaflet-marker-icon,
+.leaflet-marker-pane, .leaflet-zoom-animated,
+.leaflet-zoom-animated g, .leaflet-zoom-animated path,
+.leaflet-overlay-pane path, [class*="animate"] {
+  transition: none !important;
+}
+
+/* Event Ticker Animation */
+.ticker-wrap {
+  width: 100%;
+  overflow: hidden;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+}
+
+.ticker-content {
+  display: flex;
+  white-space: nowrap;
+  animation: ticker-scroll 45s linear infinite;
+}
+
+.ticker-content:hover {
+  animation-play-state: paused;
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(100vw); }
+  100% { transform: translateX(-100%); }
+}
+
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 20px;
+  color: var(--bs-body-color);
+  font-family: monospace;
+  font-size: 0.85rem;
+  border-right: 1px solid var(--bs-border-color);
+}
+
+.gauge-svg text {
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── 15. Inline Style Overrides for Dark Mode ───────────────── */
+html.dark-mode .container-fluid,
+html.dark-mode div[style*="background: #f8f9fa"],
+html.dark-mode div[style*="background:#f8f9fa"],
+html.dark-mode div[style*="background: rgb(248, 249, 250)"],
+html.dark-mode div[style*="background-color: #f8f9fa"],
+html.dark-mode div[style*="background-color:#f8f9fa"],
+html.dark-mode div[style*="background-color: rgb(248, 249, 250)"] {
+  background-color: var(--dm-bg) !important;
+  background: var(--dm-bg) !important;
+}
+
+html.dark-mode div.rounded-3[style*="background"],
+html.dark-mode div[style*="background: #fff"],
+html.dark-mode div[style*="background:#fff"],
+html.dark-mode div[style*="background: rgb(255, 255, 255)"],
+html.dark-mode div[style*="background: #f5f8ff"],
+html.dark-mode div[style*="background:#f5f8ff"],
+html.dark-mode div[style*="background: rgb(245, 248, 255)"] {
+  background-color: var(--dm-bg-card) !important;
+  background: var(--dm-bg-card) !important;
+  border-color: var(--dm-border) !important;
+}
+
+html.dark-mode div[style*="background: #fafbff"],
+html.dark-mode div[style*="background:#fafbff"],
+html.dark-mode div[style*="background: rgb(250, 251, 255)"],
+html.dark-mode div[style*="background: #f9fafb"],
+html.dark-mode div[style*="background:#f9fafb"],
+html.dark-mode div[style*="background: rgb(249, 250, 251)"],
+html.dark-mode div[style*="background: #fafafa"],
+html.dark-mode div[style*="background:#fafafa"],
+html.dark-mode div[style*="background: rgb(250, 250, 250)"] {
+  background-color: #171c21 !important;
+  background: #171c21 !important;
+  color: var(--dm-text) !important;
+}
+
+/* ODC/ODP card gradient titles */
+html.dark-mode div[style*="linear-gradient(90deg,#e0f7fa,#f0fdff)"],
+html.dark-mode div[style*="linear-gradient(90deg, rgb(224, 247, 250), rgb(240, 253, 255))"] {
+  background: linear-gradient(90deg, #10343c, #164651) !important;
+  border-bottom: 1px solid var(--dm-border) !important;
+}
+
+html.dark-mode div[style*="linear-gradient(90deg,#e8f0fe,#f0f4ff)"],
+html.dark-mode div[style*="linear-gradient(90deg, rgb(232, 240, 254), rgb(240, 244, 255))"] {
+  background: linear-gradient(90deg, #14233c, #1a2f52) !important;
+  border-bottom: 1px solid var(--dm-border) !important;
+}
+
+/* dashed border lines for ODC tree levels */
+html.dark-mode div[style*="borderLeft: 2px dashed"],
+html.dark-mode div[style*="borderLeft:2px dashed"],
+html.dark-mode div[style*="border-left: 2px dashed"],
+html.dark-mode div[style*="border-left:2px dashed"] {
+  border-left-color: #495057 !important;
+}
+
+/* Custom cards with light gradients */
+html.dark-mode div.card[style*="linear-gradient"] {
+  background: var(--dm-bg-card) !important;
+}
+
+/* Soft colors on subcomponents */
+html.dark-mode .bg-primary-subtle {
+  background-color: rgba(13, 110, 253, 0.15) !important;
+  border-color: rgba(13, 110, 253, 0.3) !important;
+  color: #6ea8fe !important;
+}
+html.dark-mode .bg-info-subtle {
+  background-color: rgba(13, 202, 240, 0.15) !important;
+  border-color: rgba(13, 202, 240, 0.3) !important;
+  color: #6edff6 !important;
+}
+html.dark-mode .bg-success-subtle {
+  background-color: rgba(25, 135, 84, 0.15) !important;
+  border-color: rgba(25, 135, 84, 0.3) !important;
+  color: #75b798 !important;
+}
+html.dark-mode .bg-danger-subtle {
+  background-color: rgba(220, 53, 69, 0.15) !important;
+  border-color: rgba(220, 53, 69, 0.3) !important;
+  color: #ea868f !important;
+}
+html.dark-mode .bg-warning-subtle {
+  background-color: rgba(255, 193, 7, 0.15) !important;
+  border-color: rgba(255, 193, 7, 0.3) !important;
+  color: #ffda6a !important;
+}
+html.dark-mode .bg-secondary-subtle {
+  background-color: rgba(108, 117, 125, 0.15) !important;
+  border-color: rgba(108, 117, 125, 0.3) !important;
+  color: #a7acb1 !important;
+}
+
+html.dark-mode .text-primary-emphasis { color: #6ea8fe !important; }
+html.dark-mode .text-info-emphasis { color: #6edff6 !important; }
+html.dark-mode .text-success-emphasis { color: #75b798 !important; }
+html.dark-mode .text-danger-emphasis { color: #ea868f !important; }
+html.dark-mode .text-warning-emphasis { color: #ffda6a !important; }
+html.dark-mode .text-secondary-emphasis { color: #a7acb1 !important; }
+
+html.dark-mode .text-primary { color: #0d6efd !important; }
+html.dark-mode .text-info { color: #0dcaf0 !important; }
+html.dark-mode .text-success { color: #198754 !important; }
+html.dark-mode .text-warning { color: #ffc107 !important; }
+
+/* In-popup gray backgrounds */
+html.dark-mode div[style*="background: #ececec"],
+html.dark-mode div[style*="background:#ececec"] {
+  background-color: #2b3035 !important;
+}
+
+/* ── 16. Light Mode Perfect White Overrides ─────────────────── */
+html:not(.dark-mode) body,
+html:not(.dark-mode) .content,
+html:not(.dark-mode) .layout,
+html:not(.dark-mode) .container-fluid,
+html:not(.dark-mode) .bg-body-secondary,
+html:not(.dark-mode) div[style*="background: #f8f9fa"],
+html:not(.dark-mode) div[style*="background:#f8f9fa"],
+html:not(.dark-mode) div[style*="background: rgb(248, 249, 250)"],
+html:not(.dark-mode) div[style*="background-color: #f8f9fa"],
+html:not(.dark-mode) div[style*="background-color:#f8f9fa"],
+html:not(.dark-mode) div[style*="background-color: rgb(248, 249, 250)"] {
+  background-color: #ffffff !important;
+  background: #ffffff !important;
+}
+
+html:not(.dark-mode) .shadow-sm {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
+}
+
+html:not(.dark-mode) .shadow {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark-mode) .border,
+html:not(.dark-mode) .border-bottom,
+html:not(.dark-mode) .border-top,
+html:not(.dark-mode) .border-start,
+html:not(.dark-mode) .border-end {
+  border-color: #f1f3f5 !important;
+}
+
+/* Ultimate focus outline remover for select fields */
+select:focus,
+select:focus-visible,
+select:active,
+.form-select:focus,
+.form-select:focus-visible,
+.form-select:active {
+  outline: none !important;
+  outline-width: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Specific styling for border-0 selects to make them completely flat */
+select.border-0:focus,
+select.border-0:focus-visible,
+select.border-0:active,
+.form-select.border-0:focus,
+.form-select.border-0:focus-visible,
+.form-select.border-0:active,
+html.dark-mode select.border-0:focus,
+html.dark-mode select.border-0:focus-visible,
+html.dark-mode .form-select.border-0:focus,
+html.dark-mode .form-select.border-0:focus-visible {
+  border: 0 !important;
+  border-width: 0 !important;
+  border-color: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure bg-transparent classes on form elements are fully respected in dark mode */
+html.dark-mode select.bg-transparent,
+html.dark-mode .form-select.bg-transparent,
+html.dark-mode input.bg-transparent,
+html.dark-mode .form-control.bg-transparent {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+/* ── Leaflet Popup Theme Alignment ──────────────────────────── */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--noc-bg-secondary, #fff) !important;
+  color: var(--noc-text, #1e293b) !important;
+  border: 1px solid var(--noc-border, rgba(0, 0, 0, 0.05)) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15) !important;
+}
+
+html.dark-mode .leaflet-popup-content-wrapper, 
+html.dark-mode .leaflet-popup-tip {
+  background: #151c2c !important;
+  color: #f8fafc !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Override any default leaflet text color inheritance in dark mode */
+html.dark-mode .leaflet-popup-content,
+html.dark-mode .leaflet-popup-content * {
+  color: #f8fafc !important;
+}
+
+/* Standard font overrides for popups */
+.leaflet-popup-content {
+  font-family: inherit !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
+}
+
+.leaflet-popup-close-button {
+  color: var(--noc-text-muted, #64748b) !important;
+}
+
+html.dark-mode .leaflet-popup-close-button {
+  color: #94a3b8 !important;
+}
+
+/* ── Premium Theme Toggle Button Micro-Animations ───────────── */
+.theme-toggle-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 50% !important;
+  width: 38px !important;
+  height: 38px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  position: relative !important;
+  overflow: hidden !important;
+  transition: background 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+  padding: 0 !important;
+}
+
+.theme-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  transform: scale(1.08);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.theme-toggle-btn:active {
+  transform: scale(0.95);
+}
+
+.theme-icon-wrapper {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-icon-wrapper .sun-icon,
+.theme-icon-wrapper .moon-icon {
+  font-size: 1.25rem;
+  position: absolute;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease;
+}
+
+/* Sun animation (Light mode active state) */
+.theme-icon-wrapper.light .sun-icon {
+  transform: scale(1) rotate(0deg);
+  opacity: 1;
+  color: #fbbf24 !important;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.5));
+}
+
+.theme-icon-wrapper.light .moon-icon {
+  transform: scale(0) rotate(90deg);
+  opacity: 0;
+}
+
+/* Moon animation (Dark mode active state) */
+.theme-icon-wrapper.dark .sun-icon {
+  transform: scale(0) rotate(-90deg);
+  opacity: 0;
+}
+
+.theme-icon-wrapper.dark .moon-icon {
+  transform: scale(1) rotate(0deg);
+  opacity: 1;
+  color: #c7d2fe !important;
+  filter: drop-shadow(0 0 4px rgba(199, 210, 254, 0.6));
+}
+
+/* During active View Transition: icon animations also pause */
+html:active-view-transition .theme-icon-wrapper .sun-icon,
+html:active-view-transition .theme-icon-wrapper .moon-icon {
+  transition: none !important;
+}
+
+/* Register the custom CSS property for Houdini interpolation */
+@property --ripple-radius {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* ── View Transition: Full-page circular reveal ────────────────── */
+
+/* Duration and timing for the snapshot group */
+::view-transition-group(root) {
+  animation-duration: 800ms;
+  animation-timing-function: cubic-bezier(0.76, 0, 0.24, 1);
+}
+
+/* Both old and new snapshots are static full-pages; disable built-in fade */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  opacity: 1;
+  height: 100%;
+}
+
+/* Stacking: new theme renders on top, old waits underneath */
+::view-transition-new(root) {
+  z-index: 9999;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+/* Isolate composite layers so they don't bleed into each other */
+::view-transition-image-pair(root) {
+  isolation: isolate;
+}
+
+/* Promote html to its own compositor layer for smooth clip-path */
+html:active-view-transition {
+  will-change: clip-path;
+}
+
+/* ── Glowing radar ripple wave (decorative, GPU-composited) ──── */
+.theme-ripple-wave {
+  position: fixed;
+  border-radius: 50%;
+  border: 3px solid rgba(59, 130, 246, 0.9);
+  box-shadow:
+    0 0 0 2px rgba(59, 130, 246, 0.3),
+    0 0 40px rgba(59, 130, 246, 0.7),
+    inset 0 0 40px rgba(59, 130, 246, 0.4);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2147483647;
+  animation: theme-ripple-expand 800ms cubic-bezier(0.76, 0, 0.24, 1) forwards;
+  will-change: width, height, opacity;
+}
+
+@keyframes theme-ripple-expand {
+  0% {
+    width: 0px;
+    height: 0px;
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.7;
+  }
+  100% {
+    width: calc(2.4 * var(--ripple-max-radius));
+    height: calc(2.4 * var(--ripple-max-radius));
+    opacity: 0;
+  }
+}
+
+/* ── Radar Pulse Animation for Map Markers ──── */
+@keyframes radar-pulse {
+  0% { transform: scale(0.45); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
 }

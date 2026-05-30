@@ -1,8 +1,6 @@
 const startAutoMonitor = require("../../services/admin/monitoring");
-const { PrismaClient } = require("@prisma/client");
+const prisma = require("../../utils/prisma");
 const redis = require("../../utils/redis");
-
-const prisma = new PrismaClient();
 
 // =========================
 // MONITOR STATE (SAFE LOCK)

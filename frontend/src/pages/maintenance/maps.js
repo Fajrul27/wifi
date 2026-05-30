@@ -1,5 +1,4 @@
-// components/NocPppoeMap.jsx
-import { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -9,9 +8,8 @@ import {
   useMap,
   ScaleControl,
   AttributionControl,
+  LayersControl,
 } from "react-leaflet";
-import { LayersControl } from "react-leaflet";
-import MarkerClusterGroup from "react-leaflet-cluster";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
 import L from "leaflet";
@@ -595,6 +593,14 @@ const NOC_MAP_STYLES = `
   .leaflet-control-layers-list label {
     color: var(--noc-text) !important;
     padding: 0.35rem 0.5rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .leaflet-control-layers-selector {
+    accent-color: var(--noc-primary) !important;
+    margin-right: 6px !important;
+    cursor: pointer;
   }
 
   .leaflet-control-layers-separator {
@@ -679,6 +685,97 @@ function MapAutoFocus({ target, zoom = 14 }) {
   }, [target, zoom, map]);
   return null;
 }
+
+// Component to auto-fit map bounds to markers
+function FitMapBounds({ coordinates, selectedRouter }) {
+  const map = useMap();
+  const prevRouterRef = useRef(undefined);
+  const userInteractedRef = useRef(false);
+  
+  // Reset interaction flag when selectedRouter changes
+  useEffect(() => {
+    if (prevRouterRef.current !== selectedRouter) {
+      prevRouterRef.current = selectedRouter;
+      userInteractedRef.current = false;
+    }
+  }, [selectedRouter]);
+
+  // Listen for user manual zoom/drag to disable auto-fitting
+  useEffect(() => {
+    const container = map.getContainer();
+    const handleInteraction = () => {
+      userInteractedRef.current = true;
+    };
+    
+    container.addEventListener("mousedown", handleInteraction);
+    container.addEventListener("touchstart", handleInteraction, { passive: true });
+    container.addEventListener("wheel", handleInteraction, { passive: true });
+    
+    return () => {
+      container.removeEventListener("mousedown", handleInteraction);
+      container.removeEventListener("touchstart", handleInteraction);
+      container.removeEventListener("wheel", handleInteraction);
+    };
+  }, [map]);
+
+  const hasFlownRef = useRef(false);
+
+  useEffect(() => {
+    // If the user has manually panned or zoomed, do not auto-fit anymore
+    if (userInteractedRef.current) return;
+
+    if (coordinates && coordinates.length > 0) {
+      const validCoords = coordinates.filter(
+        c => c && c.lat && c.lng && !isNaN(c.lat) && !isNaN(c.lng) && c.lat >= -90 && c.lat <= 90 && c.lng >= -180 && c.lng <= 180
+      );
+      if (validCoords.length > 0) {
+        const bounds = L.latLngBounds(validCoords.map(c => [c.lat, c.lng]));
+        const delay = hasFlownRef.current ? 0 : 600;
+        hasFlownRef.current = true;
+        const timer = setTimeout(() => {
+          map.fitBounds(bounds.pad(0.15), {
+            animate: true,
+            duration: 1.5,
+            maxZoom: 16,
+          });
+        }, delay);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [coordinates, map]);
+  
+  return null;
+}
+
+// Custom Leaflet SVG renderer with optimized padding to prevent lines clipping during pan
+const customRenderer = L.svg({ padding: 1.5 });
+
+// Optimized connection lines to prevent re-rendering and lag
+const MemoizedUserPolyline = React.memo(({ routerLat, routerLng, userLat, userLng, isOnline }) => {
+  return (
+    <Polyline
+      positions={[
+        [routerLat, routerLng],
+        [userLat, userLng],
+      ]}
+      noClip={true}
+      pathOptions={{
+        color: isOnline ? "#22c55e" : "#ef4444",
+        weight: isOnline ? 2 : 1,
+        opacity: isOnline ? 0.7 : 0.4,
+        dashArray: isOnline ? null : "5,8",
+        lineCap: "round",
+        noClip: true
+      }}
+    />
+  );
+}, (prev, next) => {
+  return prev.routerLat === next.routerLat &&
+         prev.routerLng === next.routerLng &&
+         prev.userLat === next.userLat &&
+         prev.userLng === next.userLng &&
+         prev.isOnline === next.isOnline;
+});
 
 // =========================
 // 📊 STATS PANEL
@@ -808,6 +905,7 @@ export default function NocPppoeMap() {
   };
 
   // Initial load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadRouters(); }, []);
 
   // Load when router changes
@@ -851,6 +949,20 @@ export default function NocPppoeMap() {
         return true;
       });
   }, [users, statusFilter, searchQuery]);
+
+  // Collect coordinates for fit bounds
+  const allCoordinates = useMemo(() => {
+    const coords = [];
+    if (router?.latitude && router?.longitude) {
+      coords.push({ lat: Number(router.latitude), lng: Number(router.longitude) });
+    }
+    filteredUsers.forEach(u => {
+      if (u.latitude && u.longitude) {
+        coords.push({ lat: Number(u.latitude), lng: Number(u.longitude) });
+      }
+    });
+    return coords;
+  }, [router, filteredUsers]);
 
   // Map layers config
   const tileLayers = {
@@ -912,7 +1024,6 @@ export default function NocPppoeMap() {
     );
   }
 
-  const currentLayer = tileLayers[mapTheme];
 
   return (
     <>
@@ -964,16 +1075,36 @@ export default function NocPppoeMap() {
         {/* Map */}
         <div className="noc-map-container">
           <MapContainer
-            center={router?.latitude ? [router.latitude, router.longitude] : [-6.2, 106.8]}
-            zoom={router?.latitude ? 14 : 12}
+            center={[-7.1506, 110.1403]}
+            zoom={8}
             className="noc-leaflet-map"
+            preferCanvas={false}
+            renderer={customRenderer}
           >
             <MapAutoFocus target={router} />
+            <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
             <ScaleControl position="bottomleft" metric />
             <AttributionControl prefix="" position="bottomright" />
 
-            {/* Base Layer */}
-            <TileLayer attribution={currentLayer.attribution} url={currentLayer.url} />
+            {/* Base Layers with dynamic opacity to prevent flash */}
+            <TileLayer
+              key="osm-tile"
+              attribution='&copy; <a href="https://osm.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              opacity={mapTheme === "osm" ? 1 : 0}
+            />
+            <TileLayer
+              key="satellite-tile"
+              attribution="Tiles &copy; Esri"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+              opacity={mapTheme === "satellite" ? 1 : 0}
+            />
+            <TileLayer
+              key="dark-tile"
+              attribution='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>'
+              url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
+              opacity={mapTheme === "dark" ? 1 : 0}
+            />
 
             {/* Layer Control */}
             <LayersControl position="topright">
@@ -995,7 +1126,7 @@ export default function NocPppoeMap() {
                 icon={createRouterIcon(router.isOnline !== false)}
                 zIndexOffset={1000}
               >
-                <Popup className="noc-popup">
+                <Popup className="noc-popup" autoPan={false}>
                   <div className="popup-header">
                     <strong>🖥️ {router.name}</strong>
                     <span className={`status-badge ${router.isOnline !== false ? "" : "offline"}`}>
@@ -1012,93 +1143,70 @@ export default function NocPppoeMap() {
               </Marker>
             )}
 
-            {/* Users with Clustering */}
-            <MarkerClusterGroup
-              chunkedLoading
-              spiderfyOnMaxZoom
-              showCoverageOnHover={false}
-              zoomToBoundsOnClick
-              iconCreateFunction={(cluster) => {
-                const count = cluster.getChildCount();
-                const online = cluster.getAllChildMarkers().filter((m) => m.options.userData?.isOnline).length;
-                const ratio = Math.round((online / count) * 100);
-                return L.divIcon({
-                  html: `<div class="cluster-icon ${ratio > 70 ? "good" : ratio > 30 ? "warn" : "bad"}"><span>${count}</span><small>${ratio}%</small></div>`,
-                  className: "noc-cluster",
-                  iconSize: [42, 42],
-                });
-              }}
-            >
-              {filteredUsers.map((u) => (
-                <Marker
-                  key={u.id || u.username}
-                  position={[u.latitude, u.longitude]}
-                  icon={createUserIcon(u.isOnline)}
-                  options={{ userData: u }}
-                >
-                  <Popup className="noc-popup" minWidth={280}>
-                    <div className="popup-header">
-                      <strong>👤 {u.username}</strong>
-                      <span className={`status-badge ${u.isOnline ? "" : "offline"}`}>
-                        {u.isOnline ? "🟢 Online" : "🔴 Offline"}
-                      </span>
+            {/* Users */}
+            {filteredUsers.map((u) => (
+              <Marker
+                key={u.id || u.username}
+                position={[u.latitude, u.longitude]}
+                icon={createUserIcon(u.isOnline)}
+                options={{ userData: u }}
+              >
+                <Popup className="noc-popup" minWidth={280} autoPan={false}>
+                  <div className="popup-header">
+                    <strong>👤 {u.username}</strong>
+                    <span className={`status-badge ${u.isOnline ? "" : "offline"}`}>
+                      {u.isOnline ? "🟢 Online" : "🔴 Offline"}
+                    </span>
+                  </div>
+                  <div className="popup-body">
+                    <div className="info-row">
+                      <label>Profile:</label>
+                      <span>{u.profile || "-"}</span>
                     </div>
-                    <div className="popup-body">
+                    <div className="info-row">
+                      <label>Client IP:</label>
+                      <span className="mono">{u.remoteAddress || "No session"}</span>
+                    </div>
+                    {u.localAddress && (
                       <div className="info-row">
-                        <label>Profile:</label>
-                        <span>{u.profile || "-"}</span>
+                        <label>Router IP:</label>
+                        <span className="mono">{u.localAddress}</span>
                       </div>
+                    )}
+                    {u.uptime && (
                       <div className="info-row">
-                        <label>Client IP:</label>
-                        <span className="mono">{u.remoteAddress || "No session"}</span>
+                        <label>Uptime:</label>
+                        <span>{u.uptime}</span>
                       </div>
-                      {u.localAddress && (
-                        <div className="info-row">
-                          <label>Router IP:</label>
-                          <span className="mono">{u.localAddress}</span>
-                        </div>
-                      )}
-                      {u.uptime && (
-                        <div className="info-row">
-                          <label>Uptime:</label>
-                          <span>{u.uptime}</span>
-                        </div>
-                      )}
-                      <hr />
-                      <div className="traffic-stats">
-                        <div className="traffic-item">
-                          <i style={{ color: "var(--noc-success)" }}>↓</i>
-                          <span>{(u.rxMbps || 0).toFixed(2)} Mbps</span>
-                        </div>
-                        <div className="traffic-item">
-                          <i style={{ color: "var(--noc-primary)" }}>↑</i>
-                          <span>{(u.txMbps || 0).toFixed(2)} Mbps</span>
-                        </div>
+                    )}
+                    <hr />
+                    <div className="traffic-stats">
+                      <div className="traffic-item">
+                        <i style={{ color: "var(--noc-success)" }}>↓</i>
+                        <span>{(u.rxMbps || 0).toFixed(2)} Mbps</span>
+                      </div>
+                      <div className="traffic-item">
+                        <i style={{ color: "var(--noc-primary)" }}>↑</i>
+                        <span>{(u.txMbps || 0).toFixed(2)} Mbps</span>
                       </div>
                     </div>
-                    <div className="popup-footer">
-                      Updated: {new Date().toLocaleTimeString()}
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
-            </MarkerClusterGroup>
+                  </div>
+                  <div className="popup-footer">
+                    Updated: {new Date().toLocaleTimeString()}
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
 
             {/* Connection Lines */}
             {router?.latitude && router?.longitude && filteredUsers.map((u) => (
-              <Polyline
-                key={`line-${u.id || u.username}`}
-                positions={[
-                  [router.latitude, router.longitude],
-                  [u.latitude, u.longitude],
-                ]}
-                pathOptions={{
-                  color: u.isOnline ? "var(--noc-success)" : "var(--noc-danger)",
-                  weight: u.isOnline ? 2 : 1,
-                  opacity: u.isOnline ? 0.7 : 0.4,
-                  dashArray: u.isOnline ? null : "5,8",
-                  lineCap: "round",
-                }}
+              <MemoizedUserPolyline
+                key={`line-${u.id || u.username}-${u.isOnline ? 'on' : 'off'}`}
+                routerLat={router.latitude}
+                routerLng={router.longitude}
+                userLat={u.latitude}
+                userLng={u.longitude}
+                isOnline={u.isOnline}
               />
             ))}
           </MapContainer>

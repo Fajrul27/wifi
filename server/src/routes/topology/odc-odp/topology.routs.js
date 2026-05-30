@@ -7,6 +7,7 @@ const TopologyController = require("../../../controllers/topology/odc-odp/topolo
 // ====================== ODC ==========================
 // =====================================================
 
+router.get("/", TopologyController.getTopologyMap);
 router.post("/odc", TopologyController.createOdc);
 
 router.put("/odc/:id", TopologyController.updateOdc);
@@ -35,5 +36,7 @@ router.get("/odp/:id", TopologyController.getOdpById);
 router.delete("/odp/:id", TopologyController.deleteOdp);
 
 router.get("/ports/available", TopologyController.getAvailablePorts);
+
+router.get("/users/:routerId", TopologyController.getUsersByRouter);
 
 module.exports = router;

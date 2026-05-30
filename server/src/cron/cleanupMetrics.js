@@ -1,7 +1,5 @@
 const cron = require("node-cron");
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient();
+const prisma = require("../utils/prisma");
 
 // setiap jam 02:00
 cron.schedule("0 2 * * *", async () => {

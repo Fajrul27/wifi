@@ -2,7 +2,9 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import api from "../../services/api";
 import OdcForm from "./components/OdcForm";
+import OdpForm from "./components/OdpForm";
 import PortItem from "./components/PortItem";
+import MapPicker from "../../components/MapPicker";
 
 // ─────────────────────────────────────────────────────────────
 // CONFIG & UTILS
@@ -89,7 +91,7 @@ const ConfirmDialog = ({ show, title, message, onConfirm, onCancel, confirmText 
 // ─────────────────────────────────────────────────────────────
 // OLT CARD COMPONENT
 // ─────────────────────────────────────────────────────────────
-const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onManagePort, onCreateOdc, portLoading }) => {
+const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onManagePort, onCreateOdc, onCreateChildOdc, onCreateOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, portLoading }) => {
   const [showPorts, setShowPorts] = useState(true);
   const router = routers.find((r) => r.id === olt.routerId);
   const portCount = olt.ports?.length || olt._count?.ports || 0;
@@ -168,6 +170,12 @@ const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onMa
                     port={port}
                     olt={olt}
                     onCreateOdc={onCreateOdc}
+                    onCreateChildOdc={onCreateChildOdc}
+                    onCreateOdp={onCreateOdp}
+                    onDeleteOdc={onDeleteOdc}
+                    onDeleteOdp={onDeleteOdp}
+                    onEditOdc={onEditOdc}
+                    onEditOdp={onEditOdp}
                     onDelete={!port._count?.nodes ? () => onDeletePort(port.id, olt.id) : undefined}
                     onManage={onManagePort}
                     loading={isLoading}
@@ -208,10 +216,14 @@ const OltModal = ({ show, onClose, onSubmit, initialData, routers, mode = "creat
     const newErrors = {};
     if (!formData.routerId) newErrors.routerId = "Router wajib dipilih";
     if (!formData.name?.trim()) newErrors.name = "Nama OLT wajib diisi";
-    if (formData.latitude && (isNaN(formData.latitude) || formData.latitude < -90 || formData.latitude > 90)) {
+    if (formData.latitude === "" || formData.latitude === undefined || formData.latitude === null) {
+      newErrors.latitude = "Koordinat latitude wajib ditentukan pada peta";
+    } else if (isNaN(formData.latitude) || formData.latitude < -90 || formData.latitude > 90) {
       newErrors.latitude = "Latitude tidak valid (-90 hingga 90)";
     }
-    if (formData.longitude && (isNaN(formData.longitude) || formData.longitude < -180 || formData.longitude > 180)) {
+    if (formData.longitude === "" || formData.longitude === undefined || formData.longitude === null) {
+      newErrors.longitude = "Koordinat longitude wajib ditentukan pada peta";
+    } else if (isNaN(formData.longitude) || formData.longitude < -180 || formData.longitude > 180) {
       newErrors.longitude = "Longitude tidak valid (-180 hingga 180)";
     }
     setErrors(newErrors);
@@ -278,30 +290,30 @@ const OltModal = ({ show, onClose, onSubmit, initialData, routers, mode = "creat
                 {errors.name && <div className="invalid-feedback">{errors.name}</div>}
               </div>
               
-              <div className="row g-2">
-                <div className="col-6">
-                  <label className="form-label small fw-semibold">Latitude</label>
-                  <input type="number" step="any" className={`form-control form-control-sm ${errors.latitude ? "is-invalid" : ""}`}
-                    placeholder="-6.2011" value={formData.latitude}
-                    onChange={(e) => setFormData(prev => ({ ...prev, latitude: e.target.value }))} />
-                  {errors.latitude && <div className="invalid-feedback">{errors.latitude}</div>}
-                </div>
-                <div className="col-6">
-                  <label className="form-label small fw-semibold">Longitude</label>
-                  <input type="number" step="any" className={`form-control form-control-sm ${errors.longitude ? "is-invalid" : ""}`}
-                    placeholder="106.8177" value={formData.longitude}
-                    onChange={(e) => setFormData(prev => ({ ...prev, longitude: e.target.value }))} />
-                  {errors.longitude && <div className="invalid-feedback">{errors.longitude}</div>}
-                </div>
+              {/* MapPicker integration for OLT location */}
+              <div className="mb-2">
+                <label className="form-label small fw-semibold">
+                  <i className="bi bi-geo-alt me-1 text-primary"></i>
+                  Koordinat Lokasi OLT <span className="text-muted fw-normal">(opsional — klik peta atau tempel koordinat)</span>
+                </label>
               </div>
-              
-              {formData.latitude && formData.longitude && (
-                <div className="mt-3">
-                  <a href={`https://maps.google.com/?q=${formData.latitude},${formData.longitude}`} target="_blank" rel="noopener noreferrer" className="small text-decoration-none text-primary">
-                    <i className="bi bi-geo-alt me-1"></i> Lihat di Google Maps
-                  </a>
-                </div>
-              )}
+              <div className="rounded-3 overflow-hidden border border-secondary-subtle shadow-sm mb-3">
+                <MapPicker
+                  key={`olt-map-${initialData?.id ?? 'new'}-${show}`}
+                  lat={formData.latitude}
+                  lng={formData.longitude}
+                  height={250}
+                  onChange={(lat, lng) =>
+                    setFormData((p) => ({
+                      ...p,
+                      latitude: lat === "" ? "" : Number(lat).toFixed(7),
+                      longitude: lng === "" ? "" : Number(lng).toFixed(7),
+                    }))
+                  }
+                />
+              </div>
+              {errors.latitude && <div className="text-danger small mb-1">{errors.latitude}</div>}
+              {errors.longitude && <div className="text-danger small mb-3">{errors.longitude}</div>}
             </div>
             <div className="modal-footer border-top-0 pt-0">
               <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={loading}>Batal</button>
@@ -333,34 +345,25 @@ export default function OltManagement() {
   /* ───────────────── MODAL STATES ───────────────── */
   const [showOltModal, setShowOltModal] = useState(false);
   const [showOdcModal, setShowOdcModal] = useState(false);
+  const [showChildOdcModal, setShowChildOdcModal] = useState(false);
+  const [showOdpModal, setShowOdpModal] = useState(false);
+  const [showEditOdcModal, setShowEditOdcModal] = useState(false);   // ← NEW
+  const [showEditOdpModal, setShowEditOdpModal] = useState(false);   // ← NEW
   const [editingOlt, setEditingOlt] = useState(null);
+  const [editingOdc, setEditingOdc] = useState(null);               // ← NEW
+  const [editingOdp, setEditingOdp] = useState(null);               // ← NEW
   const [selectedPortForOdc, setSelectedPortForOdc] = useState(null);
   const [selectedOltForOdc, setSelectedOltForOdc] = useState(null);
+  const [selectedParentOdc, setSelectedParentOdc] = useState(null);
+  const [selectedParentPort, setSelectedParentPort] = useState(null);
+  // Callback fetchTree dari PortItem — dipanggil setelah ODC/ODP berhasil dibuat
+  const fetchTreeCallbackRef = useRef(null);
   
   /* ───────────────── CONFIRM DIALOG ───────────────── */
   const [confirmDelete, setConfirmDelete] = useState({ show: false, olt: null, portId: null, oltId: null, routerId: null });
   
   /* ───────────────── REFS ───────────────── */
   const isMountedRef = useRef(true);
-
-  /* ───────────────── CACHE HELPERS ───────────────── */
-  const getCachedData = useCallback(() => {
-    try {
-      const cached = sessionStorage.getItem(CACHE_KEY);
-      const timestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY);
-      if (cached && timestamp && Date.now() - Number(timestamp) < CACHE_TTL) {
-        return JSON.parse(cached);
-      }
-    } catch (e) { console.warn("Cache read error:", e); }
-    return null;
-  }, []);
-
-  const setSessionCache = useCallback((data) => {
-    try {
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
-      sessionStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-    } catch (e) { console.warn("Cache write error:", e); }
-  }, []);
 
   /* ───────────────── LOAD DATA ───────────────── */
   const loadRouters = useCallback(async () => {
@@ -384,16 +387,21 @@ export default function OltManagement() {
     
     const init = async () => {
       setLoading(true);
-      const routersData = await loadRouters();
-      if (!isMountedRef.current) return;
-      setRouters(routersData);
-      
-      if (routersData.length > 0) {
-        const defaultRouter = routersData[0].id;
-        setSelectedRouter(defaultRouter);
-        await loadRouterOlts(defaultRouter);
+      try {
+        const routersData = await loadRouters();
+        if (!isMountedRef.current) return;
+        setRouters(routersData);
+        
+        if (routersData.length > 0) {
+          const defaultRouter = routersData[0].id;
+          setSelectedRouter(defaultRouter);
+          await loadRouterOlts(defaultRouter);
+        }
+      } catch (err) {
+        console.error("Init error:", err);
+      } finally {
+        if (isMountedRef.current) setLoading(false);
       }
-      setLoading(false);
     };
     init();
     return () => { isMountedRef.current = false; };
@@ -402,11 +410,12 @@ export default function OltManagement() {
   /* ───────────────── LOAD OLTs FOR SELECTED ROUTER ───────────────── */
   const loadRouterOlts = useCallback(async (routerId) => {
     if (!routerId) return;
-    
-    const cached = getCachedData();
-    if (cached?.[routerId]) {
-      setOltsByRouter(prev => ({ ...prev, [routerId]: cached[routerId] }));
-    }
+    setLoading(true);
+    // Clear stale cache so fresh data is always shown after mutations
+    try {
+      sessionStorage.removeItem(CACHE_KEY);
+      sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
+    } catch (_) {}
     
     try {
       const olts = await loadOltsByRouter(routerId);
@@ -418,14 +427,14 @@ export default function OltManagement() {
       );
       
       if (isMountedRef.current) {
-        const newCache = { ...getCachedData(), [routerId]: oltsWithPorts };
         setOltsByRouter(prev => ({ ...prev, [routerId]: oltsWithPorts }));
-        setSessionCache(newCache);
       }
     } catch (err) {
       console.error("Failed to load OLTs:", err);
+    } finally {
+      if (isMountedRef.current) setLoading(false);
     }
-  }, [loadOltsByRouter, loadOltDetails, getCachedData, setSessionCache]);
+  }, [loadOltsByRouter, loadOltDetails]);
 
   useEffect(() => {
     if (selectedRouter) loadRouterOlts(selectedRouter);
@@ -497,19 +506,95 @@ const handleAddPort = async (olt) => {
     }
   };
 
-  // ODC Handlers
-  const handleCreateOdc = async (formData) => {
-    const { data } = await api.post("/topology/odc", formData);
-    if (selectedRouter) {
-      await loadRouterOlts(selectedRouter);
-    }
-    return data;
-  };
-
+  // ─── Root ODC (dari OLT port) ───
   const handleOpenOdcForm = (port, olt) => {
     setSelectedPortForOdc(port);
     setSelectedOltForOdc(olt);
     setShowOdcModal(true);
+  };
+  const handleCreateOdc = async () => {
+    // Root ODC: refresh OLT list agar isUsed port berubah
+    if (selectedRouter) await loadRouterOlts(selectedRouter);
+  };
+
+  // ─── Child ODC (dari port ODC) ───
+  // onCreateChildOdc dipanggil dari OdcPortRow dengan signature: (odc, port, fetchTree)
+  const handleOpenChildOdcForm = (parentOdc, parentPort, fetchTreeCb) => {
+    setSelectedParentOdc(parentOdc);
+    setSelectedParentPort(parentPort);
+    fetchTreeCallbackRef.current = fetchTreeCb ?? null;
+    setShowChildOdcModal(true);
+  };
+  const handleCreateChildOdc = async () => {
+    // Panggil fetchTree langsung agar tree update instan
+    if (fetchTreeCallbackRef.current) {
+      await fetchTreeCallbackRef.current();
+      fetchTreeCallbackRef.current = null;
+    }
+  };
+
+  // ─── ODP (dari port ODC) ───
+  const handleOpenOdpForm = (parentOdc, parentPort, fetchTreeCb) => {
+    setSelectedParentOdc(parentOdc);
+    setSelectedParentPort(parentPort);
+    fetchTreeCallbackRef.current = fetchTreeCb ?? null;
+    setShowOdpModal(true);
+  };
+  const handleCreateOdp = async () => {
+    if (fetchTreeCallbackRef.current) {
+      await fetchTreeCallbackRef.current();
+      fetchTreeCallbackRef.current = null;
+    }
+  };
+
+  // ─── Hapus ODP ───
+  const handleDeleteOdp = async (odp, fetchTreeCb) => {
+    if (!window.confirm(`Hapus ODP "${odp.name}"? Pastikan tidak ada user aktif.`)) return;
+    try {
+      await api.delete(`/topology/odp/${odp.id}`);
+      if (fetchTreeCb) await fetchTreeCb();
+      else if (selectedRouter) await loadRouterOlts(selectedRouter);
+    } catch (err) {
+      alert("Gagal hapus ODP: " + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // ─── Hapus ODC ───
+  const handleDeleteOdc = async (odc, fetchTreeCb) => {
+    if (!window.confirm(`Hapus ODC "${odc.name}"? Semua child ODC dan ODP di dalamnya akan ikut terhapus.`)) return;
+    try {
+      await api.delete(`/topology/odc/${odc.id}`);
+      if (fetchTreeCb) await fetchTreeCb();
+      else if (selectedRouter) await loadRouterOlts(selectedRouter);
+    } catch (err) {
+      alert("Gagal hapus ODC: " + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // ─── Edit ODC ─── ← NEW
+  const handleOpenEditOdcForm = (odc, fetchTreeCb) => {
+    setEditingOdc(odc);
+    fetchTreeCallbackRef.current = fetchTreeCb ?? null;
+    setShowEditOdcModal(true);
+  };
+  const handleEditOdc = async () => {
+    if (fetchTreeCallbackRef.current) {
+      await fetchTreeCallbackRef.current();
+      fetchTreeCallbackRef.current = null;
+    }
+  };
+
+  // ─── Edit ODP ─── ← NEW
+  const handleOpenEditOdpForm = (odp, fetchTreeCb) => {
+    setEditingOdp(odp);
+    fetchTreeCallbackRef.current = fetchTreeCb ?? null;
+    setShowEditOdpModal(true);
+  };
+  const handleEditOdp = async () => {
+    if (fetchTreeCallbackRef.current) {
+      await fetchTreeCallbackRef.current();
+      fetchTreeCallbackRef.current = null;
+    }
   };
 
   /* ───────────────── FILTERED DATA ───────────────── */
@@ -530,9 +615,8 @@ const handleAddPort = async (olt) => {
       <style>{`
         .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
         .card-hover:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important; }
-        .port-item-hover:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important; transform: translateX(2px); transition: all 0.2s ease; }
-        .odp-badge:hover { filter: brightness(0.9); cursor: pointer; }
-        .modal-backdrop { --bs-backdrop-zindex: 1050; --bs-backdrop-bg: #000; --bs-backdrop-opacity: 0.5; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spin-anim { animation: spin 0.8s linear infinite; display: inline-block; }
       `}</style>
 
       <div className="container-fluid py-4" style={{ background: "#f8f9fa", minHeight: "100vh" }}>
@@ -629,15 +713,17 @@ const handleAddPort = async (olt) => {
                 onEdit={(o) => { setEditingOlt(o); setShowOltModal(true); }}
                 onDelete={(o) => setConfirmDelete({ show: true, olt: o, portId: null, oltId: null, routerId: olt.routerId })}
                 onAddPort={handleAddPort}
-                onDeletePort={(portId, oltId) => setConfirmDelete({ 
-                  show: true, 
-                  olt: null, 
-                  portId, 
-                  oltId,
-                  routerId: olt.routerId 
+                onDeletePort={(portId, oltId) => setConfirmDelete({
+                  show: true, olt: null, portId, oltId, routerId: olt.routerId
                 })}
                 onManagePort={handleManagePort}
                 onCreateOdc={handleOpenOdcForm}
+                onCreateChildOdc={handleOpenChildOdcForm}
+                onCreateOdp={handleOpenOdpForm}
+                onDeleteOdc={handleDeleteOdc}
+                onDeleteOdp={handleDeleteOdp}
+                onEditOdc={handleOpenEditOdcForm}
+                onEditOdp={handleOpenEditOdpForm}
                 portLoading={portLoading}
               />
             ))}
@@ -654,12 +740,47 @@ const handleAddPort = async (olt) => {
           mode={editingOlt ? "edit" : "create"}
         />
 
+        {/* Root ODC Form */}
         <OdcForm
           show={showOdcModal}
           onClose={() => { setShowOdcModal(false); setSelectedPortForOdc(null); setSelectedOltForOdc(null); }}
           onSubmit={handleCreateOdc}
           initialPort={selectedPortForOdc}
           olt={selectedOltForOdc}
+        />
+
+        {/* Child ODC Form */}
+        <OdcForm
+          show={showChildOdcModal}
+          onClose={() => { setShowChildOdcModal(false); setSelectedParentOdc(null); setSelectedParentPort(null); }}
+          onSubmit={handleCreateChildOdc}
+          parentOdc={selectedParentOdc}
+          parentPort={selectedParentPort}
+        />
+
+        {/* Edit ODC Form */}
+        <OdcForm
+          show={showEditOdcModal}
+          onClose={() => { setShowEditOdcModal(false); setEditingOdc(null); }}
+          onSubmit={handleEditOdc}
+          editingOdc={editingOdc}
+        />
+
+        {/* ODP Form */}
+        <OdpForm
+          show={showOdpModal}
+          onClose={() => { setShowOdpModal(false); setSelectedParentOdc(null); setSelectedParentPort(null); }}
+          onSubmit={handleCreateOdp}
+          parentOdc={selectedParentOdc}
+          parentPort={selectedParentPort}
+        />
+
+        {/* Edit ODP Form */}
+        <OdpForm
+          show={showEditOdpModal}
+          onClose={() => { setShowEditOdpModal(false); setEditingOdp(null); }}
+          onSubmit={handleEditOdp}
+          editingOdp={editingOdp}
         />
 
         {/* Delete OLT Confirmation */}

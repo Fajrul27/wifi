@@ -1,118 +1,224 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import api from "../../../services/api";
 
-// =========================
-// ODC TREE ITEM (FLAT + SAFE RECURSION OPTIONAL)
-// =========================
-const OdcTreeItem = ({
-  odc,
-  level = 0,
-  onCreateChildOdc,
-  onCreateOdp,
-  onManageOdp
-}) => {
-  const [expanded, setExpanded] = useState(true);
+// ─────────────────────────────────────────────────────────────
+// UTIL
+// ─────────────────────────────────────────────────────────────
+const SPLIT_LABEL = {
+  ONE_TO_2: "1:2", ONE_TO_4: "1:4", ONE_TO_8: "1:8",
+  ONE_TO_16: "1:16", ONE_TO_32: "1:32", ONE_TO_64: "1:64",
+};
 
-  const usedPorts = odc.ports?.filter(p => p.isUsed).length || 0;
-  const totalPorts = odc.ports?.length || 0;
+const fmtCoord = (v) => (v !== null && v !== undefined ? parseFloat(v).toFixed(4) : null);
+
+// ─────────────────────────────────────────────────────────────
+// LOCATION BADGE — clickable chip with Maps link
+// ─────────────────────────────────────────────────────────────
+const LocationBadge = ({ lat, lng }) => {
+  if (lat == null || lng == null) {
+    return (
+      <span className="badge bg-secondary-subtle text-secondary border border-secondary-subtle"
+        style={{ fontSize: "0.6rem" }}>
+        <i className="bi bi-geo-alt me-1" />Belum ada lokasi
+      </span>
+    );
+  }
+  return (
+    <a
+      href={`https://maps.google.com/?q=${lat},${lng}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="badge bg-success-subtle text-success border border-success-subtle text-decoration-none"
+      style={{ fontSize: "0.6rem" }}
+      title={`Lat: ${lat}, Lng: ${lng}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <i className="bi bi-geo-alt-fill me-1" />
+      {fmtCoord(lat)}, {fmtCoord(lng)}
+    </a>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// ASSIGN USER MODAL
+// ─────────────────────────────────────────────────────────────
+const AssignUserModal = ({ show, onClose, odp, odpPort, routerId, onSuccess }) => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!show || !routerId) return;
+    setLoading(true); setSearch(""); setSelected(null); setError("");
+    api.get(`/topology/users/${routerId}`)
+      .then(res => setUsers((res.data?.data ?? []).filter(u => !u.odpPortId)))
+      .catch(err => setError(err.response?.data?.message || "Gagal load users"))
+      .finally(() => setLoading(false));
+  }, [show, routerId]);
+
+  const handleAssign = async () => {
+    if (!selected) return;
+    setSubmitting(true); setError("");
+    try {
+      await api.post(`/topology/odp/${odp.id}/assign`, { userId: selected.id, odpPortId: odpPort.id });
+      onSuccess?.(); onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Gagal assign user");
+    } finally { setSubmitting(false); }
+  };
+
+  if (!show) return null;
+  const filtered = users.filter(u => u.username?.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div
-      className={`ms-${level * 3} mt-2`}
-      style={{
-        borderLeft: level > 0 ? "2px dashed #dee2e6" : "none",
-        paddingLeft: level > 0 ? "12px" : "0"
-      }}
-    >
-      <div className="card border-0 shadow-sm mb-2" style={{ fontSize: "0.85rem" }}>
-
-        {/* HEADER */}
-        <div
-          className="card-header py-2 px-3 d-flex justify-content-between align-items-center"
-          style={{ background: "var(--bs-primary-bg-subtle)", cursor: "pointer" }}
-          onClick={() => setExpanded(!expanded)}
-        >
-          <div className="d-flex align-items-center gap-2">
-            <i className={`bi bi-${expanded ? "dash-square" : "plus-square"} text-primary`} />
-
-            <span className="fw-semibold text-primary">
-              {odc.name}
-            </span>
-
-            <span className="badge bg-primary-subtle text-primary">
-              {odc.splitRatio?.replace("ONE_TO_", "1:")}
-            </span>
-
-            <small className="text-muted">
-              {usedPorts}/{totalPorts}
-            </small>
+    <div className="modal fade show d-block" tabIndex="-1"
+      style={{ background: "rgba(0,0,0,0.55)", zIndex: 1070 }} onClick={onClose}>
+      <div className="modal-dialog modal-dialog-centered modal-sm" onClick={e => e.stopPropagation()}>
+        <div className="modal-content border-0 shadow">
+          <div className="modal-header py-2">
+            <h6 className="modal-title fw-semibold" style={{ fontSize: "0.85rem" }}>
+              <i className="bi bi-person-plus me-2 text-success" />
+              Assign User → Port #{odpPort?.index}
+            </h6>
+            <button className="btn-close btn-close-sm" onClick={onClose} disabled={submitting} />
           </div>
-
-          <div className="d-flex gap-1">
-            <button
-              className="btn btn-sm btn-outline-success"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreateChildOdc?.(odc);
-              }}
-            >
-              <i className="bi bi-diagram-3-fill" />
-            </button>
-
-            <button
-              className="btn btn-sm btn-outline-info"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreateOdp?.(odc);
-              }}
-            >
-              <i className="bi bi-boxes" />
+          <div className="modal-body py-2">
+            {error && <div className="alert alert-danger py-1 small mb-2">{error}</div>}
+            <div className="text-muted small mb-2">ODP: <strong>{odp?.name}</strong></div>
+            <input type="text" className="form-control form-control-sm mb-2"
+              placeholder="Cari username..." value={search}
+              onChange={e => setSearch(e.target.value)} autoFocus />
+            {loading ? (
+              <div className="text-center py-2"><span className="spinner-border spinner-border-sm text-primary" /></div>
+            ) : (
+              <div style={{ maxHeight: "200px", overflowY: "auto" }}>
+                {filtered.length === 0
+                  ? <small className="text-muted d-block text-center py-2">Tidak ada user tersedia</small>
+                  : filtered.map(u => (
+                    <div key={u.id}
+                      className={`d-flex align-items-center gap-2 px-2 py-1 rounded mb-1 border ${selected?.id === u.id ? "bg-success-subtle border-success" : "bg-light border-transparent"}`}
+                      style={{ cursor: "pointer", fontSize: "0.78rem" }}
+                      onClick={() => setSelected(u)}>
+                      <i className={`bi bi-circle${u.isOnline ? "-fill text-success" : " text-muted"}`} style={{ fontSize: "0.5rem" }} />
+                      <span className="fw-medium">{u.username}</span>
+                      {u.profile && <span className="text-muted ms-auto">• {u.profile}</span>}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+          <div className="modal-footer py-2 gap-2">
+            <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={submitting}>Batal</button>
+            <button className="btn btn-success btn-sm" onClick={handleAssign} disabled={!selected || submitting}>
+              {submitting ? <><span className="spinner-border spinner-border-sm me-1" style={{ width: "10px", height: "10px" }} />Menyimpan...</> : "Assign"}
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
 
-        {/* BODY */}
-        {expanded && (
-          <div className="card-body py-2 px-3">
+// ─────────────────────────────────────────────────────────────
+// ODP ITEM
+// ─────────────────────────────────────────────────────────────
+const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
+  const [expanded, setExpanded] = useState(true);
+  const [assignModal, setAssignModal] = useState({ show: false, port: null });
+  const usedPorts = odp.ports?.filter(p => p.isUsed).length ?? 0;
+  const totalPorts = odp.ports?.length ?? 0;
 
-            {/* PORTS */}
-            <div className="d-flex flex-wrap gap-1">
-              {odc.ports?.map(port => (
-                <span
-                  key={port.id}
-                  className={`badge py-1 px-2 ${
-                    port.isUsed
-                      ? "bg-success-subtle text-success border"
-                      : "bg-light text-muted border"
-                  }`}
-                  style={{ fontSize: "0.75rem" }}
-                >
-                  <i className={`bi bi-${port.isUsed ? "box-seam" : "circle"}`} />
-                  {" "}#{port.index}
-                </span>
-              ))}
-            </div>
+  const [unassigning, setUnassigning] = useState(null);
 
-            {/* ODP */}
-            {odc.odps?.length > 0 && (
-              <div className="mt-2 border-top pt-2">
-                <small className="text-muted fw-semibold">ODP:</small>
+  const handleUnassign = async (port) => {
+    // port.user bisa null jika include tidak lengkap — gunakan userId langsung dari port
+    const userId = port.user?.id ?? port.userId;
+    const username = port.user?.username ?? `User Port #${port.index}`;
+    
+    if (!userId) { 
+      alert("ID user tidak ditemukan. Coba refresh halaman.");
+      return; 
+    }
+    if (!window.confirm(`Lepas "${username}" dari Port #${port.index} di ${odp.name}?`)) return;
+    
+    setUnassigning(port.id);
+    try {
+      await api.post(`/topology/odp/unassign/${userId}`);
+      onRefresh?.();
+    } catch (err) { 
+      alert("Gagal unassign: " + (err.response?.data?.message || err.message)); 
+    } finally {
+      setUnassigning(null);
+    }
+  };
 
-                <div className="d-flex flex-wrap gap-1 mt-1">
-                  {odc.odps.map(odp => (
-                    <span
-                      key={odp.id}
-                      className="badge bg-info-subtle text-info border"
-                      style={{ cursor: "pointer", fontSize: "0.75rem" }}
-                      onClick={() => onManageOdp?.(odp.id)}
-                    >
-                      {odp.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
+  return (
+    <div style={{ marginLeft: "16px", borderLeft: "2px dashed #0dcaf0", paddingLeft: "10px", marginTop: "6px" }}>
+      <AssignUserModal show={assignModal.show} onClose={() => setAssignModal({ show: false, port: null })}
+        odp={odp} odpPort={assignModal.port} routerId={routerId} onSuccess={onRefresh} />
+
+      <div className="card border-0 shadow-sm mb-1" style={{ fontSize: "0.78rem" }}>
+        {/* ODP Header */}
+        <div className="d-flex align-items-center justify-content-between px-2 py-1"
+          style={{ background: "linear-gradient(90deg,#e0f7fa,#f0fdff)", borderRadius: "6px 6px 0 0", cursor: "pointer" }}
+          onClick={() => setExpanded(!expanded)}>
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <i className={`bi bi-${expanded ? "dash-square" : "plus-square"} text-info`} />
+            <i className="bi bi-boxes text-info" />
+            <span className="fw-semibold text-info">{odp.name}</span>
+            <span className="badge bg-info text-white" style={{ fontSize: "0.65rem" }}>
+              {SPLIT_LABEL[odp.splitRatio] ?? odp.splitRatio}
+            </span>
+            <span className={`badge ${usedPorts === totalPorts && totalPorts > 0 ? "bg-danger-subtle text-danger" : usedPorts > 0 ? "bg-warning-subtle text-warning" : "bg-success-subtle text-success"}`}
+              style={{ fontSize: "0.65rem" }}>
+              {usedPorts}/{totalPorts} port
+            </span>
+            {/* Location badge */}
+            <LocationBadge lat={odp.latitude} lng={odp.longitude} />
+          </div>
+          <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
+            {onEditOdp && (
+              <button className="btn btn-sm btn-outline-warning py-0 px-1" title="Edit Lokasi ODP"
+                onClick={() => onEditOdp(odp)}>
+                <i className="bi bi-pencil" style={{ fontSize: "0.65rem" }} />
+              </button>
             )}
+            {onDeleteOdp && (
+              <button className="btn btn-sm btn-outline-danger py-0 px-1" title="Hapus ODP"
+                onClick={() => onDeleteOdp(odp)}>
+                <i className="bi bi-trash" style={{ fontSize: "0.65rem" }} />
+              </button>
+            )}
+          </div>
+        </div>
 
+        {/* ODP Ports */}
+        {expanded && (
+          <div className="px-2 py-2">
+            <div className="d-flex flex-wrap gap-1">
+              {(odp.ports ?? []).map(port => (
+                <button key={port.id}
+                  className={`btn btn-sm py-1 px-2 ${port.isUsed ? "btn-success" : "btn-outline-secondary"}`}
+                  style={{ fontSize: "0.68rem", lineHeight: 1.3, minWidth: "52px" }}
+                  title={port.isUsed ? `${port.user?.username ?? "Terpakai"} — klik untuk lepas` : `Port #${port.index} — klik untuk assign`}
+                  disabled={unassigning === port.id}
+                  onClick={() => port.isUsed ? handleUnassign(port) : setAssignModal({ show: true, port })}>
+                  {unassigning === port.id ? (
+                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                  ) : (
+                    <i className={`bi bi-${port.isUsed ? "person-fill" : "person-plus"}`} />
+                  )}
+                  <span className="ms-1">#{port.index}</span>
+                  {port.isUsed && port.user && (
+                    <span className="d-block" style={{ fontSize: "0.58rem", opacity: 0.9 }}>{port.user.username}</span>
+                  )}
+                </button>
+              ))}
+              {totalPorts === 0 && <small className="text-muted fst-italic">Belum ada port</small>}
+            </div>
           </div>
         )}
       </div>
@@ -120,132 +226,273 @@ const OdcTreeItem = ({
   );
 };
 
-// =========================
-// MAIN PORT ITEM
-// =========================
+// ─────────────────────────────────────────────────────────────
+// ODC PORT ROW — satu baris port ODC
+// ─────────────────────────────────────────────────────────────
+const OdcPortRow = ({ port, odc, level, onAddChildOdc, onAddOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, childOdcMap, routerId, onRefresh }) => {
+  const isODC = port.connectionType === "ODC";
+  const isODP = port.connectionType === "ODP";
+  const isFree = port.connectionType === "NONE";
+  const childOdc = isODC && port.connectedOdcId ? childOdcMap[port.connectedOdcId] : null;
+  const connectedOdp = isODP && port.connectedOdp ? port.connectedOdp : null;
+
+  return (
+    <div className="mb-1">
+      <div className={`d-flex align-items-center justify-content-between rounded px-2 py-1 border ${
+        isODC ? "bg-primary-subtle border-primary-subtle" :
+        isODP ? "bg-info-subtle border-info-subtle" :
+        "bg-white border-secondary-subtle"
+      }`} style={{ fontSize: "0.76rem" }}>
+        <div className="d-flex align-items-center gap-2">
+          <i className={`bi bi-${isODC ? "diagram-3-fill text-primary" : isODP ? "boxes text-info" : "circle text-muted"}`} />
+          <span className={`fw-semibold ${isODC ? "text-primary" : isODP ? "text-info" : "text-muted"}`}>
+            Port #{port.index}
+          </span>
+          {!isFree && (
+            <span className={`badge ${isODC ? "bg-primary" : "bg-info text-white"}`} style={{ fontSize: "0.6rem" }}>
+              {port.connectionType}
+            </span>
+          )}
+          {isFree && <span className="badge bg-light text-muted border" style={{ fontSize: "0.6rem" }}>Kosong</span>}
+        </div>
+
+        {isFree && (
+          <div className="d-flex gap-1">
+            <button className="btn btn-outline-primary py-0 px-2" style={{ fontSize: "0.62rem" }}
+              onClick={() => onAddChildOdc?.(odc, port, onRefresh)} title="Pasang ODC">
+              <i className="bi bi-diagram-3-fill" /> ODC
+            </button>
+            <button className="btn btn-outline-info py-0 px-2" style={{ fontSize: "0.62rem" }}
+              onClick={() => onAddOdp?.(odc, port, onRefresh)} title="Pasang ODP">
+              <i className="bi bi-boxes" /> ODP
+            </button>
+          </div>
+        )}
+      </div>
+
+      {childOdc && (
+        <OdcTreeItem odc={childOdc} level={level + 1}
+          onAddChildOdc={onAddChildOdc} onAddOdp={onAddOdp}
+          onDeleteOdc={onDeleteOdc} onDeleteOdp={onDeleteOdp}
+          onEditOdc={onEditOdc} onEditOdp={onEditOdp}
+          childOdcMap={childOdcMap} routerId={routerId} onRefresh={onRefresh} />
+      )}
+      {connectedOdp && (
+        <OdpItem odp={connectedOdp} routerId={routerId}
+          onDeleteOdp={onDeleteOdp}
+          onEditOdp={onEditOdp}
+          onRefresh={onRefresh} />
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// ODC TREE ITEM — rekursif
+// ─────────────────────────────────────────────────────────────
+const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, routerId, onRefresh, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp }) => {
+  const [expanded, setExpanded] = useState(true);
+  const usedPorts = odc.ports?.filter(p => p.isUsed).length ?? 0;
+  const totalPorts = odc.ports?.length ?? 0;
+
+  const localMap = { ...childOdcMap };
+  const addAll = (node) => {
+    if (!node.children) return;
+    for (const c of node.children) { localMap[c.id] = c; addAll(c); }
+  };
+  if (odc.children) { for (const c of odc.children) { localMap[c.id] = c; addAll(c); } }
+
+  const indent = Math.min(level * 12, 48);
+
+  return (
+    <div style={{ marginLeft: `${indent}px`, marginTop: "6px",
+      borderLeft: level > 0 ? "2px dashed #adb5bd" : "none",
+      paddingLeft: level > 0 ? "10px" : "0" }}>
+      <div className="card border-0 shadow-sm" style={{ fontSize: "0.8rem" }}>
+        {/* ODC Header */}
+        <div className="d-flex align-items-center justify-content-between px-2 py-1"
+          style={{ background: "linear-gradient(90deg,#e8f0fe,#f0f4ff)", borderRadius: "6px 6px 0 0", cursor: "pointer" }}
+          onClick={() => setExpanded(!expanded)}>
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <i className={`bi bi-${expanded ? "dash-square" : "plus-square"} text-primary`} />
+            <i className="bi bi-diagram-3-fill text-primary" />
+            <span className="fw-bold text-primary">{odc.name}</span>
+            <span className="badge bg-primary" style={{ fontSize: "0.62rem" }}>
+              {SPLIT_LABEL[odc.splitRatio] ?? odc.splitRatio}
+            </span>
+            <span className={`badge ${usedPorts === totalPorts && totalPorts > 0 ? "bg-danger-subtle text-danger border border-danger-subtle" : usedPorts > 0 ? "bg-warning-subtle text-warning border border-warning-subtle" : "bg-success-subtle text-success border border-success-subtle"}`}
+              style={{ fontSize: "0.62rem" }}>
+              {usedPorts}/{totalPorts} port
+            </span>
+            {/* Location badge */}
+            <LocationBadge lat={odc.latitude} lng={odc.longitude} />
+          </div>
+          <div className="d-flex gap-1" onClick={e => e.stopPropagation()}>
+            {onEditOdc && (
+              <button className="btn btn-sm btn-outline-warning py-0 px-1" title="Edit Lokasi ODC"
+                onClick={() => onEditOdc(odc)}>
+                <i className="bi bi-pencil" style={{ fontSize: "0.65rem" }} />
+              </button>
+            )}
+            {onDeleteOdc && (
+              <button className="btn btn-sm btn-outline-danger py-0 px-1" title="Hapus ODC"
+                onClick={() => onDeleteOdc(odc)}>
+                <i className="bi bi-trash" style={{ fontSize: "0.65rem" }} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ODC Ports */}
+        {expanded && (
+          <div className="px-2 py-2" style={{ background: "#fafbff" }}>
+            {totalPorts === 0
+              ? <small className="text-muted fst-italic">Tidak ada port</small>
+              : (odc.ports ?? []).map(port => (
+                <OdcPortRow key={port.id} port={port} odc={odc} level={level}
+                  onAddChildOdc={onAddChildOdc} onAddOdp={onAddOdp}
+                  onDeleteOdc={onDeleteOdc} onDeleteOdp={onDeleteOdp}
+                  onEditOdc={onEditOdc} onEditOdp={onEditOdp}
+                  childOdcMap={localMap} routerId={routerId} onRefresh={onRefresh} />
+              ))
+            }
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// MAIN PORT ITEM (OLT Port)
+// ─────────────────────────────────────────────────────────────
 export default function PortItem({
-  port,
-  olt,
-  onCreateOdc,
-  onCreateOdp,
-  onManageOdp,
+  port, olt,
+  onCreateOdc,       // (port, olt) → buka form root ODC
+  onCreateChildOdc,  // (parentOdc, parentPort, fetchTree) → buka form child ODC
+  onCreateOdp,       // (parentOdc, parentPort, fetchTree) → buka form ODP
+  onDeleteOdc,       // (odc, fetchTree) → hapus ODC
+  onDeleteOdp,       // (odp, fetchTree) → hapus ODP
+  onEditOdc,         // (odc, fetchTree) → edit ODC ← NEW
+  onEditOdp,         // (odp, fetchTree) → edit ODP ← NEW
   onDelete,
-  loading
+  loading,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [odcTree, setOdcTree] = useState([]);
   const [loadingTree, setLoadingTree] = useState(false);
 
-  const isUsed = port?._count?.odcs > 0 || port?._count?.nodes > 0;
+  const isUsed = port?.isUsed === true || (port?._count?.odcs ?? 0) > 0;
+
+  const fetchTree = useCallback(async () => {
+    if (!port?.id) return;
+    setLoadingTree(true);
+    try {
+      const res = await api.get(`/topology/odc/tree/${port.id}`);
+      setOdcTree(res.data?.data ?? []);
+    } catch (err) {
+      console.error("Gagal load ODC tree:", err.response?.data || err);
+      setOdcTree([]);
+    } finally { setLoadingTree(false); }
+  }, [port?.id]);
+
+  // Auto-expand jika port terpakai
+  useEffect(() => {
+    if (isUsed && !expanded) setExpanded(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUsed]);
 
   useEffect(() => {
     if (expanded) fetchTree();
-  }, [expanded]);
+  }, [expanded, fetchTree]);
 
-  // =========================
-  // FIXED FETCH (BASED ON YOUR REAL RESPONSE)
-  // =========================
-const fetchTree = async () => {
-  setLoadingTree(true);
-
-  try {
-    const oltId = olt?.id;
-
-    if (!oltId) {
-      setOdcTree([]);
-      return;
-    }
-
-    const res = await api.get(`/olts/olt/${oltId}`);
-
-    const ports = res.data?.data?.ports ?? [];
-
-    // 🔥 CARI PORT YANG SESUAI DENGAN PORT INI
-    const currentPort = ports.find(p => p.id === port.id);
-
-    const odcs = currentPort?.odcs ?? [];
-
-    setOdcTree(odcs);
-
-  } catch (err) {
-    console.error(err);
-    setOdcTree([]);
-  } finally {
-    setLoadingTree(false);
-  }
-};
+  // Build flat map
+  const buildMap = (nodes) => {
+    const map = {};
+    const go = (list) => { for (const n of list) { map[n.id] = n; if (n.children) go(n.children); } };
+    go(nodes); return map;
+  };
+  const childOdcMap = buildMap(odcTree);
 
   return (
-    <div className="border rounded-3 mb-2 bg-white">
+    <div className={`rounded-3 mb-2 border ${isUsed ? "border-primary-subtle" : "border-secondary-subtle"}`}
+      style={{ background: isUsed ? "#f5f8ff" : "#fff" }}>
 
-      {/* HEADER */}
-      <div className="d-flex justify-content-between align-items-center p-2 px-3">
-
+      {/* OLT PORT HEADER */}
+      <div className="d-flex justify-content-between align-items-center px-3 py-2">
         <div className="d-flex align-items-center gap-2">
-          <i className={`bi bi-${isUsed ? "plug-fill text-primary" : "plug text-muted"}`} />
-
-          <span className={`small fw-medium ${isUsed ? "text-primary" : "text-muted"}`}>
+          <div className={`rounded-circle d-flex align-items-center justify-content-center ${isUsed ? "bg-primary" : "bg-secondary-subtle"}`}
+            style={{ width: 26, height: 26 }}>
+            <i className={`bi bi-plug${isUsed ? "-fill text-white" : " text-secondary"}`} style={{ fontSize: "0.7rem" }} />
+          </div>
+          <span className={`fw-semibold ${isUsed ? "text-primary" : "text-muted"}`} style={{ fontSize: "0.85rem" }}>
             PORT {port?.index}
           </span>
-
-          {isUsed && (
-            <span className="badge bg-primary-subtle text-primary">
-              Terpakai
-            </span>
-          )}
+          {isUsed
+            ? <span className="badge bg-primary-subtle text-primary border border-primary-subtle" style={{ fontSize: "0.68rem" }}>Terpakai</span>
+            : <span className="badge bg-secondary-subtle text-secondary border" style={{ fontSize: "0.68rem" }}>Kosong</span>
+          }
         </div>
 
         <div className="d-flex gap-1">
-
-          <button
-            className="btn btn-sm btn-outline-success"
-            onClick={() => onCreateOdc?.(port, olt)}
-            disabled={loading}
-          >
-            <i className="bi bi-diagram-3" />
-          </button>
-
-          <button
-            className="btn btn-sm btn-outline-secondary"
-            onClick={() => setExpanded(!expanded)}
-          >
+          {/* Tombol pasang ODC (hanya jika kosong) */}
+          {!isUsed && (
+            <button className="btn btn-sm btn-outline-primary" style={{ fontSize: "0.7rem" }}
+              onClick={() => onCreateOdc?.(port, olt)} disabled={loading}
+              title="Pasang ODC ke port OLT ini">
+              <i className="bi bi-diagram-3" /> ODC
+            </button>
+          )}
+          {/* Toggle tree */}
+          <button className={`btn btn-sm ${expanded ? "btn-primary" : "btn-outline-secondary"}`}
+            onClick={() => setExpanded(!expanded)} title={expanded ? "Tutup tree" : "Lihat topology"}>
             <i className={`bi bi-chevron-${expanded ? "up" : "down"}`} />
           </button>
-
+          {/* Refresh */}
+          {expanded && (
+            <button className="btn btn-sm btn-outline-secondary" onClick={fetchTree}
+              disabled={loadingTree} title="Refresh tree">
+              <i className={`bi bi-arrow-clockwise${loadingTree ? " spin-anim" : ""}`} />
+            </button>
+          )}
+          {/* Delete port (hanya jika kosong) */}
           {!isUsed && (
-            <button
-              className="btn btn-sm btn-outline-danger"
-              onClick={() => onDelete?.()}
-            >
+            <button className="btn btn-sm btn-outline-danger" onClick={() => onDelete?.()} title="Hapus port">
               <i className="bi bi-trash" />
             </button>
           )}
-
         </div>
       </div>
 
-      {/* TREE */}
+      {/* TREE AREA */}
       {expanded && (
-        <div className="border-top p-2 bg-light-subtle">
-
+        <div className="border-top px-3 py-2" style={{ background: "#f9fafb" }}>
           {loadingTree ? (
-            <small className="text-muted">Loading...</small>
+            <div className="d-flex align-items-center gap-2 py-2">
+              <span className="spinner-border spinner-border-sm text-primary" />
+              <small className="text-muted">Memuat topology...</small>
+            </div>
           ) : odcTree.length === 0 ? (
-            <div className="text-center py-2">
-              <small className="text-muted">Belum ada ODC</small>
+            <div className="text-center py-3">
+              <i className="bi bi-diagram-3 text-muted d-block mb-1" style={{ fontSize: "1.5rem" }} />
+              <small className="text-muted">Belum ada ODC. Klik tombol <strong>ODC</strong> di atas untuk pasang.</small>
             </div>
           ) : (
             odcTree.map(odc => (
               <OdcTreeItem
-                key={odc.id}
-                odc={odc}
-                onCreateChildOdc={onCreateOdc}
-                onCreateOdp={onCreateOdp}
-                onManageOdp={onManageOdp}
+                key={odc.id} odc={odc} level={0}
+                onAddChildOdc={onCreateChildOdc}
+                onAddOdp={onCreateOdp}
+                onDeleteOdc={(o) => onDeleteOdc?.(o, fetchTree)}
+                onDeleteOdp={(o) => onDeleteOdp?.(o, fetchTree)}
+                onEditOdc={(o) => onEditOdc?.(o, fetchTree)}
+                onEditOdp={(o) => onEditOdp?.(o, fetchTree)}
+                childOdcMap={childOdcMap}
+                routerId={olt?.routerId}
+                onRefresh={fetchTree}
               />
             ))
           )}
-
         </div>
       )}
     </div>

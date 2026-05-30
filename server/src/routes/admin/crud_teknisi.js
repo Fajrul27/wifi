@@ -2,8 +2,8 @@ const express = require("express");
 const router = express.Router();
 
 const TechnicianController = require("../../controllers/admin/technician.controller");
-const authMiddleware = require("../../middleware/auth.middleware");
-const authorize = require("../../middleware/role.middleware");
+const authMiddleware = require("../../Middleware/auth.middleware");
+const authorize = require("../../Middleware/role.middleware");
 
 /* =========================
    CREATE TEKNISI

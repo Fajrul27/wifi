@@ -1,8 +1,6 @@
-const { PrismaClient } = require("@prisma/client");
 const { RouterOSAPI } = require("node-routeros");
 const { encrypt, decrypt } = require("../../utils/crypto");
-
-const prisma = new PrismaClient();
+const prisma = require("../../utils/prisma");
 
 class RouterService {
 

@@ -1,0 +1,5 @@
+database_backup/
+backup.sh
+*.log
+*.txt
+node_modules/

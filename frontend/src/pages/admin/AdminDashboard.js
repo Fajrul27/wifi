@@ -1,74 +1,330 @@
-// components/FtthTopologyMap.jsx
-import React, { useMemo, useCallback, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import "./AdminDashboard.css";
 import L from "leaflet";
+import api from "../../services/api";
+import { socket } from "../../services/socket";
+import { createCustomIcon, MARKER_CONFIG, isValidCoord } from "./utils/mapUtils";
+import { FitMapBounds, MemoizedPolyline } from "./components/DashboardMapComponents";
+import DashboardKpiCards from "./components/DashboardKpiCards";
+import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
+import DashboardSystemLogs from "./components/DashboardSystemLogs";
 
-// Fix default Leaflet marker icons (untuk webpack/Vite)
-const iconAnchor = [12, 41];
-const popupAnchor = [1, -34];
 
-const createCustomIcon = (color, iconClass) => {
-  return L.divIcon({
-    className: "custom-marker",
-    html: `<div style="
-      background: ${color};
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 3px solid white;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-size: 14px;
-    "><i class="bi ${iconClass}"></i></div>`,
-    iconSize: [28, 28],
-    iconAnchor,
-    popupAnchor,
-  });
-};
-
-// Marker icons by entity type
-const MARKER_CONFIG = {
-  router: { color: "#0d6efd", icon: "bi-hdd-network", label: "Router" },
-  oltPort: { color: "#6f42c1", icon: "bi-plug", label: "OLT Port" },
-  ODC: { color: "#198754", icon: "bi-diagram-2", label: "ODC" },
-  ODP: { color: "#ffc107", icon: "bi-diagram-3", label: "ODP", textColor: "#212529" },
-  splitter: { color: "#fd7e14", icon: "bi-git", label: "Splitter" },
-  client: { color: "#dc3545", icon: "bi-person", label: "Client" },
-};
-
-// Component to auto-fit map bounds to markers
-function FitMapBounds({ coordinates }) {
-  const map = useMap();
-  
-  useMemo(() => {
-    if (coordinates?.length > 0 && coordinates.every(c => c.lat && c.lng)) {
-      const bounds = L.latLngBounds(coordinates.map(c => [c.lat, c.lng]));
-      map.fitBounds(bounds.pad(0.1));
-    }
-  }, [coordinates, map]);
-  
-  return null;
-}
-
-export default function FtthTopologyMap({ 
-  routers = [], 
-  oltPorts = [], 
-  nodes = [], 
-  splitters = [], 
-  pppoeUsers = [],
-  selectedRouter = null,
+export default function AdminDashboard({ 
+  routers: propRouters = [], 
+  oltPorts: propOltPorts = [], 
+  nodes: propNodes = [], 
+  splitters: propSplitters = [], 
+  pppoeUsers: propUsers = [],
+  selectedRouter: propSelectedRouter = null,
   onNodeClick = null,
-  onOltPortClick = null,
-  height = "600px"
+  onOltPortClick = null
 }) {
-  const [selectedEntity, setSelectedEntity] = useState(null);
-  const [mapCenter, setMapCenter] = useState([-6.2088, 106.8456]); // Default: Jakarta
+  // Jawa Tengah center as initial map position
+  const [mapCenter, setMapCenter] = useState([-7.1506, 110.1403]);
+  const [mapInstance, setMapInstance] = useState(null);
 
-  // Filter data by selected router
+  const [isDarkMode, setIsDarkMode] = useState(
+    document.documentElement.classList.contains("dark-mode")
+  );
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark-mode"));
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const [apiRouters, setApiRouters] = useState([]);
+  const [apiOltPorts, setApiOltPorts] = useState([]);
+  const [apiNodes, setApiNodes] = useState([]);
+  const [apiUsers, setApiUsers] = useState([]);
+  const [apiSelectedRouter, setApiSelectedRouter] = useState(null);
+  // New UI states
+  const [mapType, setMapType] = useState(() => {
+    try { return sessionStorage.getItem('dashboard_map_type') || 'vector'; }
+    catch(e) { return 'vector'; }
+  }); // 'vector' or 'satellite'
+  
+  useEffect(() => {
+    try { sessionStorage.setItem('dashboard_map_type', mapType); }
+    catch(e) {}
+  }, [mapType]);
+
+  const [showClients, setShowClients] = useState(() => {
+    try { const v = sessionStorage.getItem('dashboard_show_clients'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
+  });
+  const [showNodes, setShowNodes] = useState(() => {
+    try { const v = sessionStorage.getItem('dashboard_show_nodes'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
+  });
+  const [showLines, setShowLines] = useState(() => {
+    try { const v = sessionStorage.getItem('dashboard_show_lines'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('dashboard_show_clients', showClients);
+      sessionStorage.setItem('dashboard_show_nodes', showNodes);
+      sessionStorage.setItem('dashboard_show_lines', showLines);
+    } catch(e) {}
+  }, [showClients, showNodes, showLines]);
+  const [eventLogs, setEventLogs] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [isDeferredReady, setIsDeferredReady] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsDeferredReady(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const [bandwidthData, setBandwidthData] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("dashboard_bandwidth");
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return Array.from({ length: 20 }, (_, i) => ({
+      time: new Date(Date.now() - (20 - i) * 3000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      download: 0,
+      upload: 0
+    }));
+  });
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const routersTrafficRef = useRef({});
+
+  const isStandalone = propRouters.length === 0;
+
+  const routers = isStandalone ? apiRouters : propRouters;
+  const oltPorts = isStandalone ? apiOltPorts : propOltPorts;
+  const nodes = isStandalone ? apiNodes : propNodes;
+  const pppoeUsers = isStandalone ? apiUsers : propUsers;
+  const selectedRouter = isStandalone ? apiSelectedRouter : propSelectedRouter;
+
+  const addLogEvent = useCallback((message, type = 'info') => {
+    setEventLogs(prev => {
+      const newLogs = [{ id: Date.now(), time: new Date(), message, type }, ...prev];
+      return newLogs.slice(0, 50); // keep last 50
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isStandalone) return;
+
+    // Check cache first for instant load
+    try {
+      const cached = sessionStorage.getItem("dashboard_cache_base");
+      const timestamp = sessionStorage.getItem("dashboard_cache_time");
+      if (cached && timestamp && Date.now() - Number(timestamp) < 60000) { // 1 min cache
+        const data = JSON.parse(cached);
+        setApiRouters(data.routers || []);
+        setApiNodes(data.nodes || []);
+        if (data.logs?.length > 0) {
+          setEventLogs(data.logs.map(log => ({
+            ...log,
+            time: new Date(log.time)
+          })));
+        }
+        if (data.routers?.length > 0) {
+          setApiSelectedRouter(prev => prev || data.routers[0].id);
+        }
+      }
+    } catch(e) {}
+
+    Promise.allSettled([
+      api.get("/routers"),
+      api.get("/topology"),
+      api.get("/splitter"),
+      api.get("/logs"),
+    ]).then(([routerRes, nodesRes, splittersRes, logsRes]) => {
+      const extractData = (res) => {
+        if (res?.status !== 'fulfilled') return [];
+        if (Array.isArray(res.value?.data?.data)) return res.value.data.data;
+        if (Array.isArray(res.value?.data)) return res.value.data;
+        return [];
+      };
+
+      const loadedRouters = extractData(routerRes);
+      const loadedNodes = extractData(nodesRes);
+      const loadedSplitters = extractData(splittersRes);
+      const loadedLogsRaw = extractData(logsRes);
+      
+      const formattedLogs = loadedLogsRaw.length > 0 ? loadedLogsRaw.map(log => ({
+          id: log.id,
+          message: log.message,
+          type: log.type,
+          time: new Date(log.createdAt)
+      })) : [];
+
+      setApiRouters(loadedRouters);
+      setApiNodes(loadedNodes);
+      if (formattedLogs.length > 0) setEventLogs(formattedLogs);
+
+      if (loadedRouters.length > 0) {
+        setApiSelectedRouter(prev => prev || loadedRouters[0].id);
+      }
+
+      // Save to cache
+      try {
+        sessionStorage.setItem("dashboard_cache_base", JSON.stringify({
+          routers: loadedRouters,
+          nodes: loadedNodes,
+          splitters: loadedSplitters,
+          logs: formattedLogs
+        }));
+        sessionStorage.setItem("dashboard_cache_time", Date.now().toString());
+      } catch(e) {}
+
+    });
+  }, [isStandalone, addLogEvent]);
+
+  useEffect(() => {
+    if (!isStandalone || !apiSelectedRouter) return;
+    
+    // Check cache first
+    try {
+      const cacheKey = `dashboard_cache_router_${apiSelectedRouter}`;
+      const cached = sessionStorage.getItem(cacheKey);
+      const timestamp = sessionStorage.getItem(`${cacheKey}_time`);
+      if (cached && timestamp && Date.now() - Number(timestamp) < 60000) {
+        const data = JSON.parse(cached);
+        setApiOltPorts(data.oltPorts || []);
+        setApiUsers(data.users || []);
+        routersTrafficRef.current = {};
+      }
+    } catch(e) {}
+
+    // Fetch router specific data when router changes
+    const fetchRouterData = async () => {
+      try {
+        const [oltRes, usersRes] = await Promise.allSettled([
+          api.get(`/olt-ports/router/${apiSelectedRouter}`),
+          api.get(`/pppoe/${apiSelectedRouter}`)
+        ]);
+        
+        const extractData = (res) => {
+          if (res?.status !== 'fulfilled') return [];
+          if (Array.isArray(res.value?.data?.data)) return res.value.data.data;
+          if (Array.isArray(res.value?.data)) return res.value.data;
+          return [];
+        };
+        
+        const loadedOltPorts = extractData(oltRes);
+        const loadedUsers = extractData(usersRes);
+
+        setApiOltPorts(loadedOltPorts);
+        setApiUsers(loadedUsers);
+        
+        // Save to cache
+        try {
+          const cacheKey = `dashboard_cache_router_${apiSelectedRouter}`;
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            oltPorts: loadedOltPorts,
+            users: loadedUsers
+          }));
+          sessionStorage.setItem(`${cacheKey}_time`, Date.now().toString());
+        } catch(e) {}
+
+        // Also clear bandwidth data when router changes
+        routersTrafficRef.current = {};
+      } catch (err) {
+        console.error("Failed to load router specific data", err);
+      }
+    };
+    
+    fetchRouterData();
+  }, [isStandalone, apiSelectedRouter]);
+
+  // Socket realtime
+  useEffect(() => {
+    if (!isStandalone || !selectedRouter) return;
+
+    socket.emit("join-router", selectedRouter);
+
+    const handleTopologyStatus = (data) => {
+      // Logic for topology if needed, no longer generating local logs here
+    };
+
+    const handlePppoeRealtime = (data) => {
+      const incoming = data?.data;
+      if (!Array.isArray(incoming)) return;
+
+      let sumRx = 0;
+      let sumTx = 0;
+      for (const r of incoming) {
+          sumRx += Number(r.rxBps || 0);
+          sumTx += Number(r.txBps || 0);
+      }
+      routersTrafficRef.current[data.routerId] = { rx: sumRx, tx: sumTx };
+
+      if (Number(data?.routerId) !== Number(selectedRouter)) return;
+      if (incoming.length === 0) return;
+
+      setApiUsers((prev) => {
+        const map = new Map(prev.map((u) => [u.id, u]));
+        for (const r of incoming) {
+          const old = map.get(r.id) || {};
+          
+          map.set(r.id, {
+            ...old,
+            id: r.id,
+            username: r.username || old.username,
+            isOnline: !!r.isOnline,
+            profile: r.profile || old.profile || '-',
+            remoteAddress: r.remoteAddress || old.remoteAddress || null,
+            localAddress: r.localAddress || old.localAddress || null,
+            uptime: r.isOnline ? (r.uptime || null) : null,
+            lastSeen: r.lastSeen || old.lastSeen,
+            lastDisconnect: r.lastDisconnect || old.lastDisconnect,
+          });
+        }
+        return Array.from(map.values());
+      });
+    };
+
+    const handleNewSystemLog = (log) => {
+      setEventLogs(prev => {
+        const newLog = {
+          id: log.id,
+          message: log.message,
+          type: log.type,
+          time: new Date(log.createdAt)
+        };
+        const updated = [newLog, ...prev].slice(0, 50);
+        
+        // Update session storage so logs survive navigation
+        try {
+          const cachedStr = sessionStorage.getItem("dashboard_cache_base");
+          if (cachedStr) {
+            const cached = JSON.parse(cachedStr);
+            cached.logs = updated.map(l => ({
+              ...l,
+              time: l.time.toISOString ? l.time.toISOString() : new Date(l.time).toISOString()
+            }));
+            sessionStorage.setItem("dashboard_cache_base", JSON.stringify(cached));
+          }
+        } catch(e) {}
+
+        return updated;
+      });
+    };
+
+    socket.on("topology-status-realtime", handleTopologyStatus);
+    socket.on("pppoe-realtime", handlePppoeRealtime);
+    socket.on("new-system-log", handleNewSystemLog);
+
+    return () => {
+      socket.off("topology-status-realtime", handleTopologyStatus);
+      socket.off("pppoe-realtime", handlePppoeRealtime);
+      socket.off("new-system-log", handleNewSystemLog);
+    };
+  }, [isStandalone, selectedRouter]);
+
   const filteredOltPorts = useMemo(() => {
     return selectedRouter 
       ? oltPorts.filter(p => p.routerId === Number(selectedRouter))
@@ -76,48 +332,90 @@ export default function FtthTopologyMap({
   }, [oltPorts, selectedRouter]);
 
   const filteredNodes = useMemo(() => {
-    return selectedRouter 
-      ? nodes.filter(n => {
-          if (n.oltPortId) {
-            const port = oltPorts.find(p => p.id === n.oltPortId);
-            return port?.routerId === Number(selectedRouter);
-          }
-          return true;
-        })
-      : nodes;
+    if (!selectedRouter) return nodes;
+    const isNodeOnRouter = (node) => {
+      if (node.oltPortId) {
+        const port = oltPorts.find(p => p.id === node.oltPortId);
+        return port?.routerId === Number(selectedRouter);
+      }
+      if (node.parentNodeId) {
+        const parent = nodes.find(n => n.type === "ODC" && n.id === node.parentNodeId);
+        return parent ? isNodeOnRouter(parent) : false;
+      }
+      return false;
+    };
+    return nodes.filter(isNodeOnRouter);
   }, [nodes, oltPorts, selectedRouter]);
 
   const filteredUsers = useMemo(() => {
     return selectedRouter
-      ? pppoeUsers.filter(u => {
-          if (u.topologyNodeId) {
-            const node = nodes.find(n => n.id === u.topologyNodeId);
-            if (node?.oltPortId) {
-              const port = oltPorts.find(p => p.id === node.oltPortId);
-              return port?.routerId === Number(selectedRouter);
-            }
-          }
-          return true;
-        })
+      ? pppoeUsers.filter(u => !u.routerId || Number(u.routerId) === Number(selectedRouter))
       : pppoeUsers;
-  }, [pppoeUsers, nodes, oltPorts, selectedRouter]);
+  }, [pppoeUsers, selectedRouter]);
 
-  // Collect all coordinates for auto-fit
+  const searchResults = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term || term.length < 2) return [];
+    const results = [];
+    filteredUsers.forEach(u => {
+      if (u.username?.toLowerCase().includes(term))
+        results.push({ ...u, _type: 'client', _label: u.username, _icon: 'bi-pc-display-horizontal', _color: u.isOnline ? '#10b981' : '#ef4444' });
+    });
+    filteredNodes.forEach(n => {
+      if (n.name?.toLowerCase().includes(term))
+        results.push({ ...n, _type: 'node', _label: n.name, _icon: n.type === 'ODP' ? 'bi-modem-fill' : 'bi-hdd-network-fill', _color: n.type === 'ODP' ? '#f59e0b' : '#8b5cf6' });
+    });
+    routers.forEach(r => {
+      if (r.name?.toLowerCase().includes(term))
+        results.push({ ...r, _type: 'router', _label: r.name, _icon: 'bi-router-fill', _color: '#0ea5e9' });
+    });
+    return results.slice(0, 10);
+  }, [searchTerm, filteredUsers, filteredNodes, routers]);
+
+  // Real bandwidth data from socket (All Routers)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBandwidthData(prev => {
+        const newData = [...prev.slice(1)];
+        let totalRx = 0;
+        let totalTx = 0;
+        
+        Object.values(routersTrafficRef.current).forEach(t => {
+            totalRx += t.rx;
+            totalTx += t.tx;
+        });
+
+        newData.push({
+          time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          download: totalTx, // Router Transmit (TX) = Client Download
+          upload: totalRx    // Router Receive (RX) = Client Upload
+        });
+
+        try {
+          sessionStorage.setItem("dashboard_bandwidth", JSON.stringify(newData));
+        } catch(e) {}
+        
+        return newData;
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+
+
   const allCoordinates = useMemo(() => {
+    if (!isDeferredReady) return [];
     const coords = [];
-    
-    routers.forEach(r => { if (r.latitude && r.longitude) coords.push({ lat: r.latitude, lng: r.longitude }); });
-    filteredOltPorts.forEach(p => { if (p.latitude && p.longitude) coords.push({ lat: p.latitude, lng: p.longitude }); });
-    filteredNodes.forEach(n => { if (n.latitude && n.longitude) coords.push({ lat: n.latitude, lng: n.longitude }); });
-    filteredUsers.forEach(u => { if (u.latitude && u.longitude) coords.push({ lat: u.latitude, lng: u.longitude }); });
-    
+    routers.forEach(r => { if (isValidCoord(r.latitude, r.longitude)) coords.push({ lat: Number(r.latitude), lng: Number(r.longitude) }); });
+    filteredOltPorts.forEach(p => { if (isValidCoord(p.latitude, p.longitude)) coords.push({ lat: Number(p.latitude), lng: Number(p.longitude) }); });
+    filteredNodes.forEach(n => { if (isValidCoord(n.latitude, n.longitude)) coords.push({ lat: Number(n.latitude), lng: Number(n.longitude) }); });
+    filteredUsers.forEach(u => { if (isValidCoord(u.latitude, u.longitude)) coords.push({ lat: Number(u.latitude), lng: Number(u.longitude) }); });
     return coords;
-  }, [routers, filteredOltPorts, filteredNodes, filteredUsers]);
+  }, [routers, filteredOltPorts, filteredNodes, filteredUsers, isDeferredReady]);
 
-  // Update map center when coordinates available
-  useMemo(() => {
+  useEffect(() => {
     if (allCoordinates.length > 0) {
-      const valid = allCoordinates.filter(c => c.lat && c.lng);
+      const valid = allCoordinates.filter(c => c && isValidCoord(c.lat, c.lng));
       if (valid.length > 0) {
         const avgLat = valid.reduce((sum, c) => sum + c.lat, 0) / valid.length;
         const avgLng = valid.reduce((sum, c) => sum + c.lng, 0) / valid.length;
@@ -126,396 +424,494 @@ export default function FtthTopologyMap({
     }
   }, [allCoordinates]);
 
-  // Build topology connections (lines)
+  const hasOnlineUser = useCallback((nodeId) => {
+    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
+    if (directUsers.some(u => u.isOnline)) return true;
+    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
+    return childNodes.some(child => hasOnlineUser(child.id));
+  }, [filteredUsers, filteredNodes]);
+
+  const hasAnyUser = useCallback((nodeId) => {
+    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
+    if (directUsers.length > 0) return true;
+    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
+    return childNodes.some(child => hasAnyUser(child.id));
+  }, [filteredUsers, filteredNodes]);
+
   const connections = useMemo(() => {
+    if (!showLines || !isDeferredReady) return [];
     const lines = [];
-    
-    // OLT Port → ODC connections
-    filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId).forEach(node => {
-      const port = filteredOltPorts.find(p => p.id === node.oltPortId);
-      if (port?.latitude && port.longitude && node.latitude && node.longitude) {
+
+    filteredOltPorts.forEach(port => {
+      const router = routers.find(r => r.id === port.routerId);
+      if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
         lines.push({
-          id: `olt-${node.id}`,
-          coordinates: [[port.latitude, port.longitude], [node.latitude, node.longitude]],
-          type: 'olt-to-odc',
-          color: '#6f42c1',
-          weight: 3,
+          id: `router-olt-${port.id}`,
+          coordinates: port.roadCoordinates || [[Number(router.latitude), Number(router.longitude)], [Number(port.latitude), Number(port.longitude)]],
+          type: 'router-to-olt',
+          color: '#0ea5e9',
+          weight: 4,
+          animate: true,
+          label: `Router ${router.name} ➔ OLT Port ${port.name}`
         });
       }
     });
 
-    // Parent Node → Child Node connections
+    filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
+      const port = filteredOltPorts.find(p => p.id === node.oltPortId);
+      if (isValidCoord(port?.latitude, port?.longitude) && isValidCoord(node.latitude, node.longitude)) {
+        const anyUser = hasAnyUser(node.id);
+        const isOnline = anyUser ? hasOnlineUser(node.id) : true;
+        lines.push({
+          id: `olt-${node.id}`,
+          coordinates: node.roadCoordinates || [[Number(port.latitude), Number(port.longitude)], [Number(node.latitude), Number(node.longitude)]],
+          type: 'olt-to-odc',
+          color: !anyUser ? '#94a3b8' : (isOnline ? '#2563eb' : '#ef4444'),
+          weight: !anyUser ? 3 : (isOnline ? 4 : 5),
+          dashArray: !anyUser ? '4,4' : (isOnline ? undefined : '8,6'),
+          animate: !anyUser ? false : isOnline,
+          label: !anyUser ? `Feeder OLT ➔ ${node.name} (Kosong)` : (isOnline ? `Feeder OLT ➔ ${node.name}` : `⚠️ PUTUS: OLT ➔ ${node.name}`)
+        });
+      }
+    });
+
     filteredNodes.forEach(node => {
-      if (node.parentNodeId && node.latitude && node.longitude) {
-        const parent = filteredNodes.find(n => n.id === node.parentNodeId);
-        if (parent?.latitude && parent.longitude) {
+      const parentId = node.incomingLinks?.[0]?.fromNodeId || node.parentNodeId;
+      if (parentId) {
+        const parent = filteredNodes.find(n => n.id === parentId);
+        if (isValidCoord(parent?.latitude, parent?.longitude) && isValidCoord(node.latitude, node.longitude)) {
+          const anyUser = hasAnyUser(node.id);
+          const isOnline = anyUser ? hasOnlineUser(node.id) : true;
+          const isODP = node.type === 'ODP';
+          
+          let defaultColor = isODP ? '#f59e0b' : '#8b5cf6';
+          let lineColor = !anyUser ? '#94a3b8' : (isOnline ? defaultColor : '#ef4444');
+          let lineDash = !anyUser ? '4,4' : (isOnline ? undefined : '8,6');
+
           lines.push({
             id: `node-${node.id}`,
-            coordinates: [[parent.latitude, parent.longitude], [node.latitude, node.longitude]],
-            type: node.type === 'ODP' ? 'odc-to-odp' : 'node-to-node',
-            color: node.type === 'ODP' ? '#ffc107' : '#198754',
-            weight: node.type === 'ODP' ? 2 : 2,
-            dashArray: node.type === 'ODP' ? '5,5' : undefined,
+            coordinates: node.roadCoordinates || [[Number(parent.latitude), Number(parent.longitude)], [Number(node.latitude), Number(node.longitude)]],
+            type: isODP ? 'odc-to-odp' : 'node-to-node',
+            color: lineColor,
+            weight: !anyUser ? 3 : (isOnline ? 4 : 5),
+            dashArray: lineDash,
+            animate: !anyUser ? false : isOnline,
+            label: `Distribusi ${parent.name} ➔ ${node.name}`
           });
         }
       }
     });
 
-    // ODP → Client connections (via splitter outputs)
-    filteredUsers.filter(u => u.topologyNodeId && u.latitude && u.longitude).forEach(user => {
-      const node = filteredNodes.find(n => n.id === user.topologyNodeId);
-      if (node?.latitude && node.longitude && node.type === 'ODP') {
-        lines.push({
-          id: `client-${user.id}`,
-          coordinates: [[node.latitude, node.longitude], [user.latitude, user.longitude]],
-          type: 'odp-to-client',
-          color: '#dc3545',
-          weight: 1,
-          dashArray: '3,3',
+    if (showClients) {
+        filteredUsers.forEach(user => {
+        if (user.topologyNodeId) {
+            const node = filteredNodes.find(n => n.id === user.topologyNodeId);
+            if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
+            const isUserOnline = user.isOnline;
+            lines.push({
+                id: `client-${user.id}`,
+                coordinates: user.roadCoordinates || [[Number(node.latitude), Number(node.longitude)], [Number(user.latitude), Number(user.longitude)]],
+                type: 'odp-to-client',
+                color: isUserOnline ? '#10b981' : '#ef4444',
+                weight: isUserOnline ? 3 : 4,
+                dashArray: isUserOnline ? undefined : '6,6',
+                animate: isUserOnline,
+                label: `Drop: ${node.name} ➔ ${user.username}`
+            });
+            }
+        }
         });
-      }
-    });
+    }
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, showClients, isDeferredReady]);
 
-  // Handle marker click
   const handleMarkerClick = useCallback((entity, type) => {
-    setSelectedEntity({ ...entity, _type: type });
-    if (type === 'oltPort' && onOltPortClick) {
-      onOltPortClick(entity.id);
-    } else if (type === 'node' && onNodeClick) {
-      onNodeClick(entity.id);
+    if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
+      const targetLatLng = L.latLng(Number(entity.latitude), Number(entity.longitude));
+      mapInstance.stop();
+      
+      const currentZoom = mapInstance.getZoom();
+      const dist = mapInstance.getCenter().distanceTo(targetLatLng);
+      
+      if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
+        mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+      } else {
+        mapInstance.flyTo(targetLatLng, 18, { animate: true, duration: 1.2 });
+      }
     }
-  }, [onNodeClick, onOltPortClick]);
+    if (type === 'oltPort' && onOltPortClick) onOltPortClick(entity.id);
+    else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
+   }, [onNodeClick, onOltPortClick, mapInstance]);
 
-  // Close detail panel
-  const closeDetail = () => setSelectedEntity(null);
+  const handleSearchSelect = (entity) => {
+    setSearchTerm("");
+    setShowSearchResults(false);
+    if (!mapInstance || !isValidCoord(entity.latitude, entity.longitude)) return;
+    handleMarkerClick(entity, entity._type);
+  };
 
-  // Legend component
-  const MapLegend = () => (
-    <div className="card border-0 shadow-sm position-absolute" style={{ 
-      bottom: '20px', right: '20px', zIndex: 1000, width: '200px',
-      background: 'white', borderRadius: '8px'
-    }}>
-      <div className="card-body py-2 px-3">
-        <h6 className="fw-semibold mb-2 small text-muted">Legend</h6>
-        <div className="d-flex flex-column gap-2">
-          {Object.entries(MARKER_CONFIG).map(([key, config]) => (
-            <div key={key} className="d-flex align-items-center gap-2 small">
-              <div style={{
-                width: '16px', height: '16px', borderRadius: '50%',
-                background: config.color, border: '2px solid white',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
-              }} />
-              <span className="text-dark">{config.label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    if (searchResults.length > 0) {
+      handleSearchSelect(searchResults[0]);
+    } else {
+      addLogEvent(`"${searchTerm}" not found.`, 'warning');
+    }
+  };
 
-  // Detail sidebar component
-  const DetailPanel = () => {
-    if (!selectedEntity) return null;
-    
-    const config = MARKER_CONFIG[selectedEntity._type] || MARKER_CONFIG.client;
-    const title = selectedEntity.name || selectedEntity.username || `${config.label} #${selectedEntity.id}`;
+
+  const renderEntityPopup = (entity, type) => {
+    const tKey = type === 'node' ? entity.type : type;
+    const conf = MARKER_CONFIG[tKey] || MARKER_CONFIG.client;
     
     return (
-      <div className="card border-0 shadow position-absolute" style={{
-        top: '20px', right: '20px', zIndex: 1000, width: '320px',
-        background: 'white', borderRadius: '12px', maxHeight: '80vh', overflow: 'auto'
-      }}>
-        <div className="card-header bg-white border-bottom py-2 px-3 d-flex justify-content-between align-items-center">
-          <div className="d-flex align-items-center gap-2">
-            <div style={{
-              width: '24px', height: '24px', borderRadius: '50%',
-              background: config.color, display: 'flex',
-              alignItems: 'center', justifyContent: 'center', color: 'white'
-            }}>
-              <i className={`bi ${config.icon}`} style={{ fontSize: '12px' }}></i>
-            </div>
-            <h6 className="mb-0 fw-semibold text-dark">{title}</h6>
-          </div>
-          <button className="btn-close btn-sm" onClick={closeDetail}></button>
-        </div>
-        
-        <div className="card-body py-3 px-3">
-          {/* Router Details */}
-          {selectedEntity._type === 'router' && (
-            <>
-              <div className="mb-2"><small className="text-muted">Host</small><br/><strong className="text-dark">{selectedEntity.host}</strong></div>
-              <div className="mb-2"><small className="text-muted">Status</small><br/>{selectedEntity.isOnline ? <span className="badge bg-success">Online</span> : <span className="badge bg-secondary">Offline</span>}</div>
-              {selectedEntity.latitude && selectedEntity.longitude && (
-                <div className="mb-2">
-                  <small className="text-muted">Coordinates</small><br/>
-                  <strong className="text-dark">{selectedEntity.latitude?.toFixed(4)}, {selectedEntity.longitude?.toFixed(4)}</strong>
+        <Popup minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`}>
+            <div className="popup-header d-flex align-items-center gap-2">
+                <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: conf.color || '#000', flexShrink: 0 }}>
+                    <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
                 </div>
-              )}
-            </>
-          )}
-
-          {/* OLT Port Details */}
-          {selectedEntity._type === 'oltPort' && (
-            <>
-              <div className="mb-2"><small className="text-muted">Interface</small><br/><code className="text-dark bg-light px-2 py-1 rounded">{selectedEntity.port}</code></div>
-              <div className="mb-2"><small className="text-muted">Router</small><br/><strong className="text-dark">{selectedEntity.router?.name || `Router #${selectedEntity.routerId}`}</strong></div>
-              <div className="mb-2"><small className="text-muted">Connected Nodes</small><br/><strong className="text-dark">{nodes.filter(n => n.oltPortId === selectedEntity.id).length}</strong></div>
-              {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100">
-                  <i className="bi bi-map me-1"></i>Open in Google Maps
-                </a>
-              )}
-            </>
-          )}
-
-          {/* Node Details (ODC/ODP) */}
-          {selectedEntity._type === 'node' && (
-            <>
-              <div className="mb-2"><small className="text-muted">Type</small><br/><span className={`badge ${selectedEntity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{selectedEntity.type}</span></div>
-              {selectedEntity.description && (
-                <div className="mb-2"><small className="text-muted">Description</small><br/><span className="text-dark">{selectedEntity.description}</span></div>
-              )}
-              {selectedEntity.cableType && (
-                <div className="mb-2"><small className="text-muted">Cable</small><br/><span className="text-dark">{selectedEntity.cableType?.replace(/_/g, ' ')} ({selectedEntity.totalCore} core)</span></div>
-              )}
-              {selectedEntity.distanceMeter && (
-                <div className="mb-2"><small className="text-muted">Distance</small><br/><span className="text-dark">{selectedEntity.distanceMeter} meters</span></div>
-              )}
-              {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100 mt-2">
-                  <i className="bi bi-map me-1"></i>Open in Google Maps
-                </a>
-              )}
-            </>
-          )}
-
-          {/* Client Details */}
-          {selectedEntity._type === 'client' && (
-            <>
-              <div className="mb-2"><small className="text-muted">IP Address</small><br/><code className="text-dark bg-light px-2 py-1 rounded">{selectedEntity.remoteAddress || '—'}</code></div>
-              <div className="mb-2"><small className="text-muted">Status</small><br/>{selectedEntity.isOnline ? <span className="badge bg-success">Online</span> : <span className="badge bg-secondary">Offline</span>}</div>
-              {selectedEntity.topologyNodeId && (
-                <div className="mb-2"><small className="text-muted">Connected To</small><br/><strong className="text-dark">{nodes.find(n => n.id === selectedEntity.topologyNodeId)?.name || `Node #${selectedEntity.topologyNodeId}`}</strong></div>
-              )}
-              {selectedEntity.latitude && selectedEntity.longitude && (
-                <a href={`https://maps.google.com/?q=${selectedEntity.latitude},${selectedEntity.longitude}`} target="_blank" rel="noopener" className="btn btn-sm btn-outline-primary w-100 mt-2">
-                  <i className="bi bi-house me-1"></i>View Customer Location
-                </a>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
+            </div>
+            <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
+                {type === 'router' && (
+                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Host</span><strong>{entity.host}</strong></div>
+                )}
+                {type === 'oltPort' && (
+                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Port</span><strong>{entity.port}</strong></div>
+                )}
+                {type === 'client' && (
+                    <>
+                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
+                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                    </>
+                )}
+                {type === 'node' && (
+                    <>
+                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Type</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
+                        {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Details</span><span>{entity.description}</span></div>}
+                        {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) && <div className="mb-2"><span className="badge bg-danger">Offline</span></div>}
+                    </>
+                )}
+                {entity.latitude && (
+                    <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm w-100 mt-2 fw-medium border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '12px' }}>
+                        Open in Google Maps <i className="bi bi-box-arrow-up-right ms-1"></i>
+                    </a>
+                )}
+            </div>
+        </Popup>
     );
   };
 
-  // Stats overlay
-  const StatsOverlay = () => (
-    <div className="card border-0 shadow-sm position-absolute" style={{
-      top: '20px', left: '20px', zIndex: 1000, background: 'white',
-      borderRadius: '8px', minWidth: '180px'
-    }}>
-      <div className="card-body py-2 px-3">
-        <h6 className="fw-semibold mb-2 small text-muted">Topology Stats</h6>
-        <div className="d-flex flex-column gap-1 small">
-          <div className="d-flex justify-content-between">
-            <span className="text-muted">OLT Ports:</span>
-            <strong className="text-dark">{filteredOltPorts.length}</strong>
-          </div>
-          <div className="d-flex justify-content-between">
-            <span className="text-muted">ODC Nodes:</span>
-            <strong className="text-dark">{filteredNodes.filter(n => n.type === 'ODC').length}</strong>
-          </div>
-          <div className="d-flex justify-content-between">
-            <span className="text-muted">ODP Nodes:</span>
-            <strong className="text-dark">{filteredNodes.filter(n => n.type === 'ODP').length}</strong>
-          </div>
-          <div className="d-flex justify-content-between">
-            <span className="text-muted">Clients:</span>
-            <strong className="text-dark">{filteredUsers.filter(u => u.topologyNodeId).length}</strong>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Render markers for each entity type
   const renderMarkers = () => {
+    if (!isDeferredReady) return [];
     const markers = [];
+    if (showNodes) {
+        routers.forEach(router => {
+        if (!isValidCoord(router.latitude, router.longitude)) return;
+        markers.push(
+            <Marker key={`router-${router.id}`} position={[Number(router.latitude), Number(router.longitude)]} icon={createCustomIcon(MARKER_CONFIG.router.color, MARKER_CONFIG.router.icon)} eventHandlers={{ click: () => handleMarkerClick(router, 'router') }}>
+                {renderEntityPopup(router, 'router')}
+            </Marker>
+        );
+        });
 
-    // Router markers
-    routers.forEach(router => {
-      if (!router.latitude || !router.longitude) return;
-      markers.push(
-        <Marker 
-          key={`router-${router.id}`} 
-          position={[router.latitude, router.longitude]}
-          icon={createCustomIcon(MARKER_CONFIG.router.color, MARKER_CONFIG.router.icon)}
-          eventHandlers={{ click: () => handleMarkerClick(router, 'router') }}
-        >
-          <Popup minWidth={200}>
-            <div className="p-1">
-              <strong className="d-block text-dark">{router.name}</strong>
-              <small className="text-muted d-block">{router.host}</small>
-              <span className={`badge ${router.isOnline ? 'bg-success' : 'bg-secondary'} mt-1`}>
-                {router.isOnline ? 'Online' : 'Offline'}
-              </span>
-            </div>
-          </Popup>
-        </Marker>
-      );
-    });
+        filteredOltPorts.forEach(port => {
+        if (!isValidCoord(port.latitude, port.longitude)) return;
+        markers.push(
+            <Marker key={`olt-${port.id}`} position={[Number(port.latitude), Number(port.longitude)]} icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon)} eventHandlers={{ click: () => handleMarkerClick(port, 'oltPort') }}>
+                {renderEntityPopup(port, 'oltPort')}
+            </Marker>
+        );
+        });
 
-    // OLT Port markers
-    filteredOltPorts.forEach(port => {
-      if (!port.latitude || !port.longitude) return;
-      markers.push(
-        <Marker 
-          key={`olt-${port.id}`} 
-          position={[port.latitude, port.longitude]}
-          icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon)}
-          eventHandlers={{ click: () => handleMarkerClick(port, 'oltPort') }}
-        >
-          <Popup minWidth={220}>
-            <div className="p-1">
-              <strong className="d-block text-dark">{port.name}</strong>
-              <small className="text-muted d-block"><i className="bi bi-plug me-1"></i>{port.port}</small>
-              <small className="text-muted d-block mt-1">{getRouterName(port.routerId)}</small>
-            </div>
-          </Popup>
-        </Marker>
-      );
-    });
+        filteredNodes.forEach(node => {
+        if (!isValidCoord(node.latitude, node.longitude)) return;
+        const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
+        const anyUser = hasAnyUser(node.id);
+        const isFaulty = anyUser && !hasOnlineUser(node.id);
+        const markerColor = isFaulty ? '#ef4444' : config.color;
 
-    // Node markers (ODC/ODP)
-    filteredNodes.forEach(node => {
-      if (!node.latitude || !node.longitude) return;
-      const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
-      markers.push(
-        <Marker 
-          key={`node-${node.id}`} 
-          position={[node.latitude, node.longitude]}
-          icon={createCustomIcon(config.color, config.icon)}
-          eventHandlers={{ click: () => handleMarkerClick(node, 'node') }}
-        >
-          <Popup minWidth={220}>
-            <div className="p-1">
-              <strong className="d-block text-dark">{node.name}</strong>
-              <span className={`badge ${node.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'} me-1`}>{node.type}</span>
-              {node.description && <small className="text-muted d-block mt-1">{node.description}</small>}
-            </div>
-          </Popup>
-        </Marker>
-      );
-    });
+        markers.push(
+            <Marker key={`node-${node.id}`} position={[Number(node.latitude), Number(node.longitude)]} icon={createCustomIcon(markerColor, config.icon, isFaulty)} eventHandlers={{ click: () => handleMarkerClick(node, 'node') }}>
+                {renderEntityPopup(node, 'node')}
+            </Marker>
+        );
+        });
+    }
 
-    // Client markers (only assigned users with location)
-    filteredUsers.filter(u => u.topologyNodeId && u.latitude && u.longitude).forEach(user => {
-      markers.push(
-        <Marker 
-          key={`client-${user.id}`} 
-          position={[user.latitude, user.longitude]}
-          icon={createCustomIcon(MARKER_CONFIG.client.color, MARKER_CONFIG.client.icon)}
-          eventHandlers={{ click: () => handleMarkerClick(user, 'client') }}
-        >
-          <Popup minWidth={200}>
-            <div className="p-1">
-              <strong className="d-block text-dark">{user.username}</strong>
-              <small className="text-muted d-block"><i className="bi bi-pc-display me-1"></i>{user.remoteAddress || 'No IP'}</small>
-              <span className={`badge ${user.isOnline ? 'bg-success' : 'bg-secondary'} mt-1`}>
-                {user.isOnline ? 'Online' : 'Offline'}
-              </span>
-            </div>
-          </Popup>
-        </Marker>
-      );
-    });
+    if (showClients) {
+        filteredUsers.forEach(user => {
+        if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
+        const isOnline = user.isOnline;
+        const markerColor = isOnline ? '#10b981' : '#ef4444';
+        markers.push(
+            <Marker key={`client-${user.id}`} position={[Number(user.latitude), Number(user.longitude)]} icon={createCustomIcon(markerColor, MARKER_CONFIG.client.icon, !isOnline)} eventHandlers={{ click: () => handleMarkerClick(user, 'client') }}>
+                {renderEntityPopup(user, 'client')}
+            </Marker>
+        );
+        });
+    }
 
     return markers;
   };
 
-  // Helper function (should be imported or defined elsewhere in your app)
-  const getRouterName = (id) => routers.find(r => r.id === id)?.name || `Router #${id}`;
+  const activeRouters = routers.filter(r => r.isOnline).length;
+  const totalRouters = routers.length;
+  const onlineClients = filteredUsers.filter(u => u.isOnline).length;
+  const totalClients = filteredUsers.length;
+  const odcCount = filteredNodes.filter(n => n.type === 'ODC').length;
+  const odpCount = filteredNodes.filter(n => n.type === 'ODP').length;
+  const faultyNodesCount = filteredNodes.filter(n => hasAnyUser(n.id) && !hasOnlineUser(n.id)).length;
+
+  useEffect(() => {
+    if (mapInstance) {
+      const t1 = setTimeout(() => mapInstance.invalidateSize(), 50);
+      const t2 = setTimeout(() => mapInstance.invalidateSize(), 350);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [isFullScreen, mapInstance]);
 
   return (
-    <div className="position-relative rounded-3 overflow-hidden border shadow-sm" style={{ height, background: '#f8f9fa' }}>
+    <div className="container-fluid p-3 bg-body-secondary d-flex flex-column" style={{ height: '100vh', overflow: 'hidden', transition: 'background-color 0.3s' }}>
       
-      {/* Map Container */}
-      <MapContainer 
-        center={mapCenter} 
-        zoom={13} 
-        scrollWheelZoom={true} 
-        style={{ height: '100%', width: '100%', borderRadius: '12px' }}
-        zoomControl={true}
-      >
-        {/* White-themed tile layer */}
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          maxZoom={19}
-        />
-        
-        {/* Topology connection lines */}
-        {connections.map(line => (
-          <Polyline 
-            key={line.id}
-            positions={line.coordinates}
-            color={line.color}
-            weight={line.weight}
-            opacity={0.7}
-            dashArray={line.dashArray}
-          />
-        ))}
-        
-        {/* Entity markers */}
-        {renderMarkers()}
-        
-        {/* Auto-fit to bounds */}
-        <FitMapBounds coordinates={allCoordinates} />
-      </MapContainer>
-
-      {/* Overlay Components */}
-      <StatsOverlay />
-      <MapLegend />
-      <DetailPanel />
-
-      {/* Map Controls */}
-      <div className="position-absolute" style={{ bottom: '20px', left: '20px', zIndex: 1000 }}>
-        <button 
-          className="btn btn-white border shadow-sm" 
-          onClick={() => {
-            if (allCoordinates.length > 0) {
-              const valid = allCoordinates.filter(c => c.lat && c.lng);
-              if (valid.length > 0) {
-                const bounds = L.latLngBounds(valid.map(c => [c.lat, c.lng]));
-                // This would need access to map instance - simplified version
-                setMapCenter([
-                  valid.reduce((s,c) => s + c.lat, 0) / valid.length,
-                  valid.reduce((s,c) => s + c.lng, 0) / valid.length
-                ]);
-              }
-            }
-          }}
-          title="Fit to all markers"
-        >
-          <i className="bi bi-arrows-fullscreen"></i>
-        </button>
+      {/* Dashboard Header */}
+      <div className="d-flex justify-content-between align-items-center mb-3 flex-shrink-0">
+        <div>
+          <h3 className="fw-bold mb-1 text-body-emphasis" style={{ letterSpacing: '-0.5px' }}>Network Operations Center</h3>
+          <p className="text-muted mb-0 small">Real-time monitoring for FTTH topology and PPPoE clients</p>
+        </div>
+        <div className="d-flex gap-2 align-items-center">
+            {isStandalone && routers.length > 0 && (
+                <div className="d-flex align-items-center bg-body border shadow-sm rounded-pill px-3 py-1 me-2">
+                    <i className="bi bi-hdd-network text-primary me-2"></i>
+                    <select 
+                        className="form-select form-select-sm border-0 shadow-none bg-transparent fw-medium" 
+                        value={selectedRouter || ''} 
+                        onChange={(e) => setApiSelectedRouter(e.target.value)}
+                        style={{ width: 'auto', minWidth: '130px', cursor: 'pointer', paddingLeft: 0, boxShadow: 'none', outline: 'none' }}
+                    >
+                        {routers.map(r => (
+                            <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+            <span className="badge bg-primary px-3 py-2 fs-6 rounded-pill d-flex align-items-center gap-2 shadow-sm">
+                <i className="bi bi-clock"></i>
+                {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+        </div>
       </div>
 
-      {/* No Data State */}
-      {allCoordinates.length === 0 && (
-        <div className="position-absolute top-50 start-50 translate-middle text-center" style={{ zIndex: 999 }}>
-          <div className="card border-0 shadow-sm" style={{ background: 'white', borderRadius: '12px', padding: '24px', minWidth: '280px' }}>
-            <i className="bi bi-geo-alt fs-1 text-muted d-block mb-2"></i>
-            <h6 className="fw-semibold text-dark mb-1">No Location Data</h6>
-            <p className="text-muted small mb-0">Add latitude/longitude to entities to display them on the map.</p>
+
+      <DashboardKpiCards 
+        activeRouters={activeRouters} 
+        totalRouters={totalRouters} 
+        onlineClients={onlineClients} 
+        totalClients={totalClients} 
+        odcCount={odcCount} 
+        odpCount={odpCount} 
+        faultyNodesCount={faultyNodesCount} 
+        filteredNodesLength={filteredNodes.length || 1} 
+      />
+
+      <div className="row g-3 flex-grow-1" style={{ minHeight: 0 }}>
+        {/* Main Map Section */}
+        <div className={isFullScreen ? "position-fixed top-0 start-0 end-0 bottom-0 bg-white" : "col-lg-9 col-xl-9 h-100"} style={isFullScreen ? { zIndex: 99999, margin: 0, padding: 0 } : {}}>
+          <div className={`card border-0 shadow-sm overflow-hidden position-relative ${isFullScreen ? 'rounded-0 w-100 h-100' : 'rounded-4 h-100'}`}>
+            
+            {/* Map Top UI Overlays */}
+            <div className="position-absolute top-0 start-0 w-100 p-3 d-flex justify-content-between align-items-start z-1000" style={{ pointerEvents: 'none' }}>
+                
+                {/* Search & Filters */}
+                <div className="d-flex flex-column gap-2" style={{ pointerEvents: 'auto', width: '320px' }}>
+                    <form onSubmit={handleSearchSubmit} className="position-relative">
+                        <i className="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted" style={{ zIndex: 1, pointerEvents: 'none' }}></i>
+                        <input 
+                            type="text" 
+                            className="form-control rounded-pill border-0 shadow-sm ps-5 pe-4 py-2 fw-medium" 
+                            placeholder="Find client or node..." 
+                            value={searchTerm}
+                            autoComplete="off"
+                            onChange={(e) => { setSearchTerm(e.target.value); setShowSearchResults(true); }}
+                            onFocus={() => setShowSearchResults(true)}
+                            onBlur={() => setTimeout(() => setShowSearchResults(false), 150)}
+                        />
+                        {searchTerm && (
+                          <button type="button" className="btn btn-sm position-absolute top-50 end-0 translate-middle-y me-2 p-0 text-muted border-0 bg-transparent" onClick={() => { setSearchTerm(""); setShowSearchResults(false); }}>
+                            <i className="bi bi-x-circle-fill" style={{ fontSize: '14px' }}></i>
+                          </button>
+                        )}
+                        {showSearchResults && searchResults.length > 0 && (
+                          <div className="position-absolute top-100 start-0 w-100 mt-1 rounded-3 overflow-hidden shadow-lg search-dropdown" style={{ zIndex: 9999 }}>
+                            {searchResults.map((item) => (
+                              <button
+                                key={`${item._type}-${item.id}`}
+                                type="button"
+                                className="search-dropdown-item w-100 d-flex align-items-center gap-2 px-3 py-2 border-0 text-start"
+                                onMouseDown={() => handleSearchSelect(item)}
+                              >
+                                <span className="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0" style={{ width: '28px', height: '28px', background: item._color, fontSize: '12px' }}>
+                                  <i className={`bi ${item._icon}`}></i>
+                                </span>
+                                <div className="overflow-hidden">
+                                  <div className="fw-medium text-truncate" style={{ fontSize: '13px' }}>{item._label}</div>
+                                  <div className="text-muted" style={{ fontSize: '11px', textTransform: 'capitalize' }}>{item._type === 'client' ? (item.isOnline ? '🟢 Online' : '🔴 Offline') : item._type}</div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                    </form>
+
+                    <details className="bg-body rounded-4 mt-2 group shadow-sm border" style={{ cursor: 'pointer' }}>
+                        <summary className="p-3 fw-bold text-muted small text-uppercase" style={{ listStyle: 'none' }}>
+                            <div className="d-flex justify-content-between align-items-center">
+                                <span><i className="bi bi-layers me-2"></i>Map Layers</span>
+                                <i className="bi bi-chevron-down"></i>
+                            </div>
+                        </summary>
+                        <div className="p-3 pt-0">
+                            <div className="form-check form-switch mb-2">
+                                <input className="form-check-input" type="checkbox" role="switch" checked={showClients} onChange={(e) => setShowClients(e.target.checked)} />
+                                <label className="form-check-label small fw-medium">Show Clients</label>
+                            </div>
+                            <div className="form-check form-switch mb-2">
+                                <input className="form-check-input" type="checkbox" role="switch" checked={showNodes} onChange={(e) => setShowNodes(e.target.checked)} />
+                                <label className="form-check-label small fw-medium">Show ODC/ODP Nodes</label>
+                            </div>
+                            <div className="form-check form-switch mb-0">
+                                <input className="form-check-input" type="checkbox" role="switch" checked={showLines} onChange={(e) => setShowLines(e.target.checked)} />
+                                <label className="form-check-label small fw-medium">Show Connections</label>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                {/* Satellite Toggle */}
+                <div className="bg-body rounded-pill p-1 d-flex shadow-sm border" style={{ pointerEvents: 'auto' }}>
+                    <button 
+                        className={`btn btn-sm rounded-pill px-3 fw-medium ${mapType === 'vector' ? 'btn-primary' : 'btn-link text-body bg-transparent border-0 text-decoration-none'}`}
+                        onClick={() => setMapType('vector')}
+                    >
+                        Vector
+                    </button>
+                    <button 
+                        className={`btn btn-sm rounded-pill px-3 fw-medium ${mapType === 'satellite' ? 'btn-primary' : 'btn-link text-body bg-transparent border-0 text-decoration-none'}`}
+                        onClick={() => setMapType('satellite')}
+                    >
+                        Satellite
+                    </button>
+                </div>
+            </div>
+
+            <MapContainer 
+                center={mapCenter} 
+                zoom={8} 
+                scrollWheelZoom={true} 
+                style={{ height: '100%', width: '100%' }}
+                zoomControl={false}
+                ref={setMapInstance}
+                preferCanvas={true}
+            >
+                {mapType === 'vector' ? (
+                    <>
+                        <TileLayer
+                            key="light-tile"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                            maxZoom={20}
+                            opacity={isDarkMode ? 0 : 1}
+                        />
+                        <TileLayer
+                            key="dark-tile"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                            maxZoom={20}
+                            opacity={isDarkMode ? 1 : 0}
+                        />
+                    </>
+                ) : (
+                    <TileLayer
+                        attribution='&copy; <a href="https://www.google.com/maps">Google Maps</a>'
+                        url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+                        maxZoom={22}
+                        subdomains={['mt0','mt1','mt2','mt3']}
+                    />
+                )}
+                
+                {connections.map(line => (
+                  <MemoizedPolyline 
+                      key={`${line.id}-${line.color}`}
+                      coordinates={line.coordinates}
+                      color={line.color}
+                      weight={line.weight}
+                      dashArray={line.dashArray}
+                      label={line.label}
+                  />
+                ))}
+                
+                {renderMarkers()}
+                <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
+            </MapContainer>
+
+            {/* Bottom Controls */}
+            <div className="position-absolute bottom-0 end-0 p-3 z-1000 d-flex flex-column gap-2" style={{ pointerEvents: 'none' }}>
+                <button 
+                    className="btn btn-white text-primary border-0 shadow rounded-circle d-flex align-items-center justify-content-center" 
+                    style={{ width: '48px', height: '48px', pointerEvents: 'auto' }}
+                    onClick={() => {
+                        requestAnimationFrame(() => {
+                            if (allCoordinates.length > 0 && mapInstance) {
+                                const validPoints = [];
+                                for (let i = 0; i < allCoordinates.length; i++) {
+                                    const c = allCoordinates[i];
+                                    if (c && c.lat != null && c.lng != null && !isNaN(c.lat) && !isNaN(c.lng)) {
+                                        validPoints.push([c.lat, c.lng]);
+                                    }
+                                }
+                                if (validPoints.length > 0) {
+                                    const targetBounds = L.latLngBounds(validPoints).pad(0.1);
+                                    mapInstance.stop();
+                                    
+                                    const targetZoom = mapInstance.getBoundsZoom(targetBounds);
+                                    const currentZoom = mapInstance.getZoom();
+                                    const dist = mapInstance.getCenter().distanceTo(targetBounds.getCenter());
+                                    
+                                    if (dist < 1000 && Math.abs(currentZoom - targetZoom) <= 1) {
+                                        mapInstance.fitBounds(targetBounds, { animate: true, duration: 0.5 });
+                                    } else {
+                                        mapInstance.flyToBounds(targetBounds, { duration: 1.5, maxZoom: 16, easeLinearity: 0.25 });
+                                    }
+                                }
+                            }
+                        });
+                    }}
+                    title="Fit Bounds to Markers"
+                >
+                    <i className="bi bi-bullseye fs-5"></i>
+                </button>
+                <button 
+                    className={`btn ${isFullScreen ? 'btn-danger' : 'btn-primary'} text-white border-0 shadow rounded-circle d-flex align-items-center justify-content-center`} 
+                    style={{ width: '48px', height: '48px', pointerEvents: 'auto' }}
+                    onClick={() => setIsFullScreen(!isFullScreen)}
+                    title="Toggle Fullscreen"
+                >
+                    <i className={`bi ${isFullScreen ? 'bi-fullscreen-exit' : 'bi-arrows-fullscreen'} fs-5`}></i>
+                </button>
+            </div>
+
+
           </div>
         </div>
-      )}
+
+        {/* Side Panel: Charts & Logs */}
+        <div className="col-lg-3 col-xl-3 h-100 d-flex flex-column gap-3" style={isFullScreen ? { display: 'none' } : {}}>
+          <DashboardBandwidthChart bandwidthData={bandwidthData} isDarkMode={isDarkMode} />
+          <DashboardSystemLogs eventLogs={eventLogs} />
+        </div>
+      </div>
     </div>
   );
 }

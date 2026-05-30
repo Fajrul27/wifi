@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import api from "../../../services/api";
 import { parseOnlineStatus, parseUptime } from "../utils";
+import { socket } from "../../../services/socket";
 
 /* ───────────────── STATUS BADGE ───────────────── */
 export const StatusBadge = ({ online }) => (
@@ -83,6 +84,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
         profile: u.profile || "-",
         ip: u.localAddress || u.remoteAddress || "-",
         isOnline: parseOnlineStatus(u.isOnline),
+        disabled: !!u.disabled,
         rx: Number(u.rxRaw ?? u.rx ?? 0),
         tx: Number(u.txRaw ?? u.tx ?? 0),
         uptime: u.uptime || "-",
@@ -121,6 +123,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
         profile: u.profile || "-",
         ip: u.localAddress || u.remoteAddress || "-",
         isOnline: parseOnlineStatus(u.isOnline),
+        disabled: !!u.disabled,
         rx: Number(u.rxRaw ?? u.rx ?? 0),
         tx: Number(u.txRaw ?? u.tx ?? 0),
         uptime: u.uptime || "-",
@@ -139,10 +142,10 @@ export const usePppoeUserMonitor = (selectedRouter) => {
     if (!selectedRouter) return;
 
     isMountedRef.current = true;
-    const socket = window.socket;
-    if (!socket) return;
-
     socketRef.current = socket;
+
+    // Join room for this router
+    socket.emit("join-router", selectedRouter);
 
     const handler = (msg) => {
       if (msg?.type !== "pppoe-realtime") return;
@@ -162,12 +165,13 @@ export const usePppoeUserMonitor = (selectedRouter) => {
             username: r.username || old.username,
             profile: r.profile || old.profile,
             isOnline,
+            disabled: r.disabled !== undefined ? !!r.disabled : old.disabled,
             ip: r.localAddress || r.remoteAddress || old.ip || "-",
             rx: Number(r.rxBps ?? r.rxRaw ?? old.rx ?? 0),
             tx: Number(r.txBps ?? r.txRaw ?? old.tx ?? 0),
             uptime: isOnline ? r.uptime || "-" : "-",
             downtime: !isOnline
-              ? (r.downtime && r.downtime !== "0s" ? r.downtime : "0s")
+              ? (r.downtime && r.downtime !== "0s" ? r.downtime : "-")
               : "-",
             latitude: old.latitude ?? null,
             longitude: old.longitude ?? null,

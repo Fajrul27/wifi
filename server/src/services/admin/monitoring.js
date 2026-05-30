@@ -1,13 +1,13 @@
 const { RouterOSAPI } = require("node-routeros");
-const { PrismaClient } = require("@prisma/client");
+const prisma = require("../../utils/prisma");
 const redis = require("../../utils/redis");
 const { broadcast } = require("../../utils/socket");
 const { decrypt } = require("../../utils/crypto");
-
-const prisma = new PrismaClient();
+const PppoeService = require("./PppoeService");
 
 const clients = new Map();
 const workers = new Map();
+const pppoeServices = new Map();
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -19,6 +19,14 @@ async function cleanupRouter(id) {
   if (worker?.stop) worker.stop();
 
   workers.delete(id);
+
+  const pppoeService = pppoeServices.get(id);
+  if (pppoeService) {
+    try {
+      pppoeService.stopAutoRealtime();
+    } catch {}
+    pppoeServices.delete(id);
+  }
 
   const client = clients.get(id);
   if (client) {
@@ -128,6 +136,15 @@ async function startRouterWorker(router) {
   let running = true;
 
   console.log(`[MONITOR] starting router ${router.id}`);
+
+  // Start PPPoE realtime monitoring
+  try {
+    const pppoeService = new PppoeService(router);
+    pppoeService.startAutoRealtime();
+    pppoeServices.set(router.id, pppoeService);
+  } catch (err) {
+    console.error(`[PPPOE MONITOR ERROR ${router.id}]`, err.message);
+  }
 
   const loop = async () => {
     while (running) {
@@ -243,8 +260,18 @@ async function startAutoMonitor() {
   }, 10000);
 }
 
-module.exports.stopRouterWorker = async (id) => {
+startAutoMonitor.stopRouterWorker = async (id) => {
   await cleanupRouter(id);
+};
+
+startAutoMonitor.startRouterWorker = async (router) => {
+  await startRouterWorker(router);
+};
+
+startAutoMonitor.stop = async () => {
+  for (const id of Array.from(workers.keys())) {
+    await cleanupRouter(id);
+  }
 };
 
 module.exports = startAutoMonitor;

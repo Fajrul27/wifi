@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import api from "../../services/api";
 import { useRouterMonitor } from "./components/RouterMonitor";
 import {
   usePppoeUserMonitor,
@@ -7,6 +8,7 @@ import {
   formatTraffic,
 } from "./components/PppoeUserMonitor";
 import AddSecret from "./components/AddSecret";
+import EditSecret from "./components/EditSecret";
 import LocationModal from "./components/EditLocation";
 // ─────────────────────────────────────────────────────────────
 // CONFIG & UTILS
@@ -182,7 +184,6 @@ export default function PppoeDashboard() {
 
   /* ───────────────── UI STATE (dari hook) ───────────────── */
   const {
-    users,
     usersLoading,
     loadUsers,
     setCachedUsers,
@@ -296,12 +297,12 @@ export default function PppoeDashboard() {
   const handleSync = async () => {
     if (!selectedRouter) return;
     try {
-      await fetch(`http://localhost:3000/api/pppoe/${selectedRouter}/sync`, { method: "POST" });
+      await api.post(`/pppoe/${selectedRouter}/sync`);
       const result = await loadUsers(selectedRouter);
       if (result?.users) setSessionCache(selectedRouter, result.users);
     } catch (err) {
       console.error(err);
-      alert("Sync failed");
+      alert(err.response?.data?.message || "Sync failed");
     }
   };
 
@@ -309,6 +310,11 @@ export default function PppoeDashboard() {
 
   const openLocationModal = (user) => {
     setLocationUser(user);
+  };
+
+  const openEditModal = (user) => {
+    setEditingUser(user);
+    setShowEditModal(true);
   };
 
 
@@ -327,10 +333,7 @@ export default function PppoeDashboard() {
     setActionLoading(prev => ({ ...prev, [key]: true }));
     
     try {
-      await fetch(
-        `http://localhost:3000/api/pppoe/${selectedRouter}/user/${username}`,
-        { method: "DELETE" }
-      );
+      await api.delete(`/pppoe/${selectedRouter}/user/${username}`);
       triggerRowAnimation(username);
       
       const result = await loadUsers(selectedRouter);
@@ -338,12 +341,72 @@ export default function PppoeDashboard() {
       
     } catch (err) {
       console.error(err);
-      alert("Failed to delete user");
+      alert(err.response?.data?.message || "Failed to delete user");
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
       setConfirmDelete({ show: false, user: null });
     }
   }, [selectedRouter, confirmDelete.user, loadUsers, triggerRowAnimation, setSessionCache]);
+
+  /* ───────────────── TOGGLE DISABLE/ENABLE HANDLER ───────────────── */
+  const handleToggleDisable = useCallback(async (user) => {
+    if (!selectedRouter) return;
+    const username = user.username;
+    const key = `toggle-${username}`;
+    const nextDisabled = !user.disabled;
+    
+    setActionLoading(prev => ({ ...prev, [key]: true }));
+    
+    try {
+      const res = await api.put(`/pppoe/${selectedRouter}/user/${username}`, { disabled: nextDisabled });
+      
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || "Failed to update secret status");
+      }
+      
+      triggerRowAnimation(username);
+      const result = await loadUsers(selectedRouter);
+      if (result?.users) setSessionCache(selectedRouter, result.users);
+      
+      // Add a slight delay to allow the MikroTik to physically disconnect the session
+      // and the realtime background sync to catch up, preventing icon blinking.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || err.message || "Failed to toggle status");
+    } finally {
+      setActionLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [selectedRouter, loadUsers, triggerRowAnimation, setSessionCache]);
+
+  /* ───────────────── RECONNECT SESSION HANDLER ───────────────── */
+  const handleReconnectUser = useCallback(async (user) => {
+    if (!selectedRouter) return;
+    const username = user.username;
+    const key = `reconnect-${username}`;
+    
+    setActionLoading(prev => ({ ...prev, [key]: true }));
+    
+    try {
+      const res = await api.post(`/pppoe/${selectedRouter}/user/${username}/kick`);
+      
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || "Failed to reconnect session");
+      }
+      
+      triggerRowAnimation(username);
+      const result = await loadUsers(selectedRouter);
+      if (result?.users) setSessionCache(selectedRouter, result.users);
+      
+      // Delay for session cleanup
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || err.message || "Failed to reconnect user session");
+    } finally {
+      setActionLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [selectedRouter, loadUsers, triggerRowAnimation, setSessionCache]);
 
   /* ───────────────── PAGINATED USERS ───────────────── */
   const paginatedUsers = useMemo(() => {
@@ -542,7 +605,7 @@ export default function PppoeDashboard() {
                   <th>User</th>
                   <th>Status</th>
                   <th>IP Address</th>
-                  <th>Uptime</th>
+                  <th>Uptime / Downtime</th>
                   <th className="text-end">RX</th>
                   <th className="text-end">TX</th>
                   <th>Location</th>
@@ -588,7 +651,14 @@ export default function PppoeDashboard() {
                           {u.service && <small className="text-muted d-block">{u.service}</small>}
                         </td>
                         <td>
-                          <StatusBadge online={u.isOnline} />
+                          {u.disabled ? (
+                            <span className="badge rounded-pill px-3 py-2 bg-secondary-subtle text-secondary-emphasis">
+                              <i className="bi bi-slash-circle-fill me-1 text-secondary" style={{ fontSize: "0.6rem" }} />
+                              Disabled
+                            </span>
+                          ) : (
+                            <StatusBadge online={u.isOnline} />
+                          )}
                         </td>
                         <td>
                           {(u.ip || u.remoteAddress) ? (
@@ -608,9 +678,23 @@ export default function PppoeDashboard() {
                           )}
                         </td>
                         <td>
-                          <span className={u.isOnline ? "text-success" : "text-muted"}>
-                            {u.isOnline ? u.uptime : u.downtime || "-"}
-                          </span>
+                          {u.isOnline ? (
+                            <div>
+                              <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 small fw-semibold">
+                                <i className="bi bi-clock-fill me-1" />
+                                {u.uptime || "-"}
+                              </span>
+                              <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Uptime</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 small fw-semibold">
+                                <i className="bi bi-clock me-1" />
+                                {u.downtime || "-"}
+                              </span>
+                              <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Downtime</span>
+                            </div>
+                          )}
                         </td>
                         <td className="text-end">
                           <span className="text-success fw-medium">{formatTraffic(u.rx)}</span>
@@ -641,9 +725,31 @@ export default function PppoeDashboard() {
                           )}
                         </td>
                         
-                        {/* ✅ ACTION: Hanya Location & Delete */}
+                        {/* ✅ ACTIONS: Edit, Toggle Enable/Disable, Kick (online only), Location, Delete */}
                         <td className="text-end">
                           <div className="d-flex justify-content-end gap-1">
+                            <ActionButton
+                              icon="pencil"
+                              title="Edit Secret"
+                              variant="primary"
+                              onClick={() => openEditModal(u)}
+                              loading={actionLoading[`edit-${u.username}`]}
+                            />
+                            <ActionButton
+                              icon={u.disabled ? "play-fill" : "pause-fill"}
+                              title={u.disabled ? "Enable Secret" : "Disable Secret"}
+                              variant={u.disabled ? "success" : "warning"}
+                              onClick={() => handleToggleDisable(u)}
+                              loading={actionLoading[`toggle-${u.username}`]}
+                            />
+                            <ActionButton
+                              icon="arrow-clockwise"
+                              title="Reconnect Session"
+                              variant="info"
+                              disabled={!u.isOnline}
+                              onClick={() => handleReconnectUser(u)}
+                              loading={actionLoading[`reconnect-${u.username}`]}
+                            />
                             <ActionButton
                               icon="geo-alt"
                               title="Edit Location"
@@ -699,6 +805,25 @@ export default function PppoeDashboard() {
             if (result?.users) setSessionCache(selectedRouter, result.users);
           }}
         />
+
+        {/* EDIT MODAL */}
+        {editingUser && (
+          <EditSecret
+            show={showEditModal}
+            username={editingUser.username}
+            routerId={selectedRouter}
+            onClose={() => {
+              setShowEditModal(false);
+              setEditingUser(null);
+            }}
+            onSaved={async () => {
+              const result = await loadUsers(selectedRouter);
+              if (result?.users) setSessionCache(selectedRouter, result.users);
+            }}
+          />
+        )}
+
+        {/* LOCATION MODAL */}
         <LocationModal
           show={!!locationUser}
           user={locationUser}
