@@ -40,6 +40,32 @@ const LocationBadge = ({ lat, lng }) => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// CONFIRM DIALOG
+// ─────────────────────────────────────────────────────────────
+const ConfirmDialog = ({ show, title, message, onConfirm, onCancel }) => {
+  if (!show) return null;
+  return (
+    <div className="modal fade show d-block" tabIndex="-1" style={{ background: "rgba(0,0,0,0.5)", zIndex: 1080 }} onClick={onCancel}>
+      <div className="modal-dialog modal-dialog-centered modal-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-content border-0 shadow">
+          <div className="modal-header border-bottom-0 pb-0">
+            <h6 className="modal-title fw-semibold">{title}</h6>
+            <button type="button" className="btn-close btn-close-sm" onClick={onCancel}></button>
+          </div>
+          <div className="modal-body py-3">
+            <p className="mb-0 small text-muted">{message}</p>
+          </div>
+          <div className="modal-footer border-top-0 pt-0">
+            <button className="btn btn-secondary btn-sm" onClick={onCancel}>Batal</button>
+            <button className="btn btn-danger btn-sm" onClick={onConfirm}>Lepas</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 // ASSIGN USER MODAL
 // ─────────────────────────────────────────────────────────────
 const AssignUserModal = ({ show, onClose, odp, odpPort, routerId, onSuccess }) => {
@@ -128,23 +154,29 @@ const AssignUserModal = ({ show, onClose, odp, odpPort, routerId, onSuccess }) =
 const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
   const [expanded, setExpanded] = useState(true);
   const [assignModal, setAssignModal] = useState({ show: false, port: null });
+  const [unassignConfirm, setUnassignConfirm] = useState({ show: false, port: null });
   const usedPorts = odp.ports?.filter(p => p.isUsed).length ?? 0;
   const totalPorts = odp.ports?.length ?? 0;
 
   const [unassigning, setUnassigning] = useState(null);
 
-  const handleUnassign = async (port) => {
-    // port.user bisa null jika include tidak lengkap — gunakan userId langsung dari port
+  const handleUnassign = (port) => {
     const userId = port.user?.id ?? port.userId;
-    const username = port.user?.username ?? `User Port #${port.index}`;
-    
     if (!userId) { 
       alert("ID user tidak ditemukan. Coba refresh halaman.");
       return; 
     }
-    if (!window.confirm(`Lepas "${username}" dari Port #${port.index} di ${odp.name}?`)) return;
-    
+    setUnassignConfirm({ show: true, port });
+  };
+
+  const handleUnassignConfirm = async () => {
+    const port = unassignConfirm.port;
+    if (!port) return;
+    const userId = port.user?.id ?? port.userId;
+    if (!userId) return;
+
     setUnassigning(port.id);
+    setUnassignConfirm({ show: false, port: null });
     try {
       await api.post(`/topology/odp/unassign/${userId}`);
       onRefresh?.();
@@ -159,6 +191,14 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
     <div style={{ marginLeft: "16px", borderLeft: "2px dashed #0dcaf0", paddingLeft: "10px", marginTop: "6px" }}>
       <AssignUserModal show={assignModal.show} onClose={() => setAssignModal({ show: false, port: null })}
         odp={odp} odpPort={assignModal.port} routerId={routerId} onSuccess={onRefresh} />
+
+      <ConfirmDialog 
+        show={unassignConfirm.show}
+        title="Lepas User dari Port"
+        message={`Apakah Anda yakin ingin melepas "${unassignConfirm.port?.user?.username || `User Port #${unassignConfirm.port?.index}`}" dari Port #${unassignConfirm.port?.index} di ${odp.name}?`}
+        onConfirm={handleUnassignConfirm}
+        onCancel={() => setUnassignConfirm({ show: false, port: null })}
+      />
 
       <div className="card border-0 shadow-sm mb-1" style={{ fontSize: "0.78rem" }}>
         {/* ODP Header */}

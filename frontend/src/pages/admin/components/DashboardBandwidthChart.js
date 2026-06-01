@@ -10,6 +10,7 @@ export default function DashboardBandwidthChart({ bandwidthData, isDarkMode }) {
         </h6>
       </div>
       <div className="card-body px-3 pb-4 pt-0 d-flex flex-column flex-grow-1" style={{ minHeight: 0 }}>
+          <div style={{ width: '100%', minHeight: '120px', flex: 1 }}>
           <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={bandwidthData} margin={{ top: 10, right: 10, left: 8, bottom: 0 }}>
                   <defs>
@@ -55,6 +56,7 @@ export default function DashboardBandwidthChart({ bandwidthData, isDarkMode }) {
                   <Area type="monotone" dataKey="upload" stroke="#4facfe" strokeWidth={2} fillOpacity={1} fill="url(#colorUpload)" name="Upload" isAnimationActive={false} />
               </AreaChart>
           </ResponsiveContainer>
+          </div>
       </div>
     </div>
   );

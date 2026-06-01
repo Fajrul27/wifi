@@ -54,6 +54,15 @@ normalizeProfile(profile) {
       // nama profile dari router
       const routerProfileNames = [];
 
+      // Optimasi Map O(1) pencarian
+      const dbProfileMap = new Map();
+      for (const x of dbProfiles) {
+        dbProfileMap.set(x.name, x);
+      }
+
+      const updates = [];
+      const creates = [];
+
       /* =========================
          CREATE / UPDATE
       ========================= */
@@ -64,36 +73,42 @@ normalizeProfile(profile) {
 
         routerProfileNames.push(data.name);
 
-        const existing = dbProfiles.find(
-          (x) => x.name === data.name
-        );
+        const existing = dbProfileMap.get(data.name);
 
         if (existing) {
-          await prisma.pppoeProfile.update({
-            where: {
-              id: existing.id,
-            },
-            data,
-          });
+          updates.push(
+            prisma.pppoeProfile.update({
+              where: {
+                id: existing.id,
+              },
+              data,
+            })
+          );
 
           updated++;
         } else {
-          await prisma.pppoeProfile.create({
-            data: {
-              routerId: this.router.id,
-              ...data,
-            },
+          creates.push({
+            routerId: this.router.id,
+            ...data,
           });
 
           created++;
         }
       }
 
+      if (updates.length > 0 || creates.length > 0) {
+        await prisma.$transaction([
+          ...updates,
+          ...(creates.length > 0 ? [prisma.pppoeProfile.createMany({ data: creates })] : [])
+        ]);
+      }
+
       /* =========================
          DELETE MISSING PROFILE
       ========================= */
+      const routerProfileNameSet = new Set(routerProfileNames);
       const deletedProfiles = dbProfiles.filter(
-        (x) => !routerProfileNames.includes(x.name)
+        (x) => !routerProfileNameSet.has(x.name)
       );
 
       if (deletedProfiles.length > 0) {

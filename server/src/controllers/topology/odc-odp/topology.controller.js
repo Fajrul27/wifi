@@ -256,10 +256,23 @@ class TopologyController {
           longitude: odc.longitude,
           oltPortId: odc.oltPortId,
           parentNodeId: odc.parentOdcId,
+          photoUrl: odc.photoUrl,
+          photoUrl2: odc.photoUrl2,
+          photoUrl3: odc.photoUrl3,
+          whatsapp: odc.whatsapp,
+          address: odc.address,
           roadCoordinates: null
         };
 
-        if (parentLat !== null && parentLng !== null && odc.latitude !== null && odc.longitude !== null) {
+        if (odc.roadCoordinates) {
+          try {
+            node.roadCoordinates = JSON.parse(odc.roadCoordinates);
+          } catch (e) {
+            console.error("Failed to parse ODC roadCoordinates:", e);
+          }
+        }
+
+        if (!node.roadCoordinates && parentLat !== null && parentLng !== null && odc.latitude !== null && odc.longitude !== null) {
           routeTasks.push(async () => {
             node.roadCoordinates = await getRoadRoute(
               Number(parentLat), Number(parentLng),
@@ -292,10 +305,23 @@ class TopologyController {
           longitude: odp.longitude,
           oltPortId: null,
           parentNodeId: odp.odcId,
+          photoUrl: odp.photoUrl,
+          photoUrl2: odp.photoUrl2,
+          photoUrl3: odp.photoUrl3,
+          whatsapp: odp.whatsapp,
+          address: odp.address,
           roadCoordinates: null
         };
 
-        if (parentLat !== null && parentLng !== null && odp.latitude !== null && odp.longitude !== null) {
+        if (odp.roadCoordinates) {
+          try {
+            node.roadCoordinates = JSON.parse(odp.roadCoordinates);
+          } catch (e) {
+            console.error("Failed to parse ODP roadCoordinates:", e);
+          }
+        }
+
+        if (!node.roadCoordinates && parentLat !== null && parentLng !== null && odp.latitude !== null && odp.longitude !== null) {
           routeTasks.push(async () => {
             node.roadCoordinates = await getRoadRoute(
               Number(parentLat), Number(parentLng),
@@ -319,6 +345,25 @@ class TopologyController {
       });
     } catch (err) {
       return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  // =====================================================
+  // UPLOAD PHOTO
+  // =====================================================
+
+  async uploadPhoto(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: "No photo uploaded" });
+      }
+      return res.json({ 
+        success: true, 
+        message: "Photo uploaded successfully", 
+        data: { photoUrl: req.file.path } 
+      });
+    } catch (err) {
+      return res.status(400).json({ success: false, message: err.message });
     }
   }
 

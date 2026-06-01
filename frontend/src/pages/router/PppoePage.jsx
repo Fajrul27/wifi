@@ -498,7 +498,7 @@ export default function PppoeDashboard() {
                 >
                   {routers.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name} {r.host && <span className="text-muted">({r.host})</span>}
+                      {r.name} {r.host ? `(${r.host})` : ""}
                     </option>
                   ))}
                 </select>

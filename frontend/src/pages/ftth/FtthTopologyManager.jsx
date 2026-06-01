@@ -360,7 +360,16 @@ export default function OltManagement() {
   const fetchTreeCallbackRef = useRef(null);
   
   /* ───────────────── CONFIRM DIALOG ───────────────── */
-  const [confirmDelete, setConfirmDelete] = useState({ show: false, olt: null, portId: null, oltId: null, routerId: null });
+  const [confirmDelete, setConfirmDelete] = useState({ 
+    show: false, 
+    olt: null, 
+    portId: null, 
+    oltId: null, 
+    routerId: null,
+    title: "",
+    message: "",
+    onConfirm: null
+  });
   
   /* ───────────────── REFS ───────────────── */
   const isMountedRef = useRef(true);
@@ -465,7 +474,7 @@ export default function OltManagement() {
       alert("Gagal menghapus OLT: " + err.message);
     } finally {
       setActionLoading(prev => ({ ...prev, [`delete-olt-${id}`]: false }));
-      setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null });
+      setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null });
     }
   };
 
@@ -494,7 +503,7 @@ const handleAddPort = async (olt) => {
       alert("Gagal menghapus port: " + err.message);
     } finally {
       setPortLoading(prev => ({ ...prev, [`delete-${portId}`]: false }));
-      setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null });
+      setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null });
     }
   };
 
@@ -548,27 +557,43 @@ const handleAddPort = async (olt) => {
   };
 
   // ─── Hapus ODP ───
-  const handleDeleteOdp = async (odp, fetchTreeCb) => {
-    if (!window.confirm(`Hapus ODP "${odp.name}"? Pastikan tidak ada user aktif.`)) return;
-    try {
-      await api.delete(`/topology/odp/${odp.id}`);
-      if (fetchTreeCb) await fetchTreeCb();
-      else if (selectedRouter) await loadRouterOlts(selectedRouter);
-    } catch (err) {
-      alert("Gagal hapus ODP: " + (err.response?.data?.message || err.message));
-    }
+  const handleDeleteOdp = (odp, fetchTreeCb) => {
+    setConfirmDelete({
+      show: true,
+      title: "Konfirmasi Hapus ODP",
+      message: `Apakah Anda yakin ingin menghapus ODP "${odp.name}"? Pastikan tidak ada user aktif yang terhubung ke ODP ini.`,
+      onConfirm: async () => {
+        try {
+          await api.delete(`/topology/odp/${odp.id}`);
+          if (fetchTreeCb) await fetchTreeCb();
+          if (selectedRouter) await loadRouterOlts(selectedRouter);
+        } catch (err) {
+          alert("Gagal hapus ODP: " + (err.response?.data?.message || err.message));
+        } finally {
+          setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null });
+        }
+      }
+    });
   };
 
   // ─── Hapus ODC ───
-  const handleDeleteOdc = async (odc, fetchTreeCb) => {
-    if (!window.confirm(`Hapus ODC "${odc.name}"? Semua child ODC dan ODP di dalamnya akan ikut terhapus.`)) return;
-    try {
-      await api.delete(`/topology/odc/${odc.id}`);
-      if (fetchTreeCb) await fetchTreeCb();
-      else if (selectedRouter) await loadRouterOlts(selectedRouter);
-    } catch (err) {
-      alert("Gagal hapus ODC: " + (err.response?.data?.message || err.message));
-    }
+  const handleDeleteOdc = (odc, fetchTreeCb) => {
+    setConfirmDelete({
+      show: true,
+      title: "Konfirmasi Hapus ODC",
+      message: `Apakah Anda yakin ingin menghapus ODC "${odc.name}"? Semua child ODC dan ODP di dalamnya akan ikut terhapus secara permanen.`,
+      onConfirm: async () => {
+        try {
+          await api.delete(`/topology/odc/${odc.id}`);
+          if (fetchTreeCb) await fetchTreeCb();
+          if (selectedRouter) await loadRouterOlts(selectedRouter);
+        } catch (err) {
+          alert("Gagal hapus ODC: " + (err.response?.data?.message || err.message));
+        } finally {
+          setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null });
+        }
+      }
+    });
   };
 
   // ─── Edit ODC ─── ← NEW
@@ -798,7 +823,16 @@ const handleAddPort = async (olt) => {
           title="Konfirmasi Hapus Port"
           message={`Hapus port ini? Tindakan ini tidak dapat dibatalkan.`}
           onConfirm={() => handleDeletePort(confirmDelete.portId, confirmDelete.oltId, confirmDelete.routerId)}
-          onCancel={() => setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null })}
+          onCancel={() => setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null })}
+        />
+
+        {/* General Confirmation Dialog (ODC/ODP) */}
+        <ConfirmDialog
+          show={confirmDelete.show && !!confirmDelete.onConfirm}
+          title={confirmDelete.title}
+          message={confirmDelete.message}
+          onConfirm={confirmDelete.onConfirm}
+          onCancel={() => setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null })}
         />
 
         {/* Footer */}

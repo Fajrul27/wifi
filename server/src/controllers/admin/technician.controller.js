@@ -7,13 +7,11 @@ class TechnicianController {
   ========================= */
   static async create(req, res) {
     try {
-      const { username, email, password } = req.body;
+      const { username, email, password, status, area, phone } = req.body;
 
       const user = await TechnicianService.create(
         req.user,
-        username,
-        email,
-        password
+        { username, email, password, status, area, phone }
       );
 
       return res.json({
@@ -78,12 +76,12 @@ class TechnicianController {
   static async update(req, res) {
     try {
       const { id } = req.params;
-      const { username, email, password } = req.body;
+      const { username, email, password, status, area, phone } = req.body;
 
       const user = await TechnicianService.update(
         req.user,
         parseInt(id),
-        { username, email, password }
+        { username, email, password, status, area, phone }
       );
 
       return res.json({

@@ -106,11 +106,12 @@ export function FitMapBounds({ coordinates, selectedRouter }) {
 }
 
 // Optimized connection lines to prevent re-rendering and lag
-export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label }) => {
+export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label, onClick }) => {
   return (
     <Polyline 
       positions={coordinates}
       pathOptions={{ color, weight, opacity: 0.85, dashArray, lineCap: "round" }}
+      eventHandlers={onClick ? { click: onClick } : undefined}
     >
       <Popup autoPan={false}><strong style={{ color }}>{label}</strong></Popup>
     </Polyline>
@@ -119,7 +120,8 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
   if (prev.color !== next.color ||
       prev.weight !== next.weight ||
       prev.dashArray !== next.dashArray ||
-      prev.label !== next.label) {
+      prev.label !== next.label ||
+      prev.onClick !== next.onClick) {
     return false;
   }
   if (prev.coordinates.length !== next.coordinates.length) return false;

@@ -39,4 +39,18 @@ router.get("/ports/available", TopologyController.getAvailablePorts);
 
 router.get("/users/:routerId", TopologyController.getUsersByRouter);
 
+// =====================================================
+// ====================== PHOTO ========================
+// =====================================================
+
+const { upload } = require("../../../utils/cloudinary");
+router.post("/photo", function(req, res, next) {
+    upload.single("photo")(req, res, function(err) {
+        if (err) {
+            return res.status(400).json({ success: false, message: "Upload gagal: " + err.message });
+        }
+        TopologyController.uploadPhoto(req, res);
+    });
+});
+
 module.exports = router;

@@ -1095,6 +1095,7 @@ export default function NocPppoeMap() {
             className="noc-leaflet-map"
             preferCanvas={false}
             renderer={customRenderer}
+            keyboard={false}
           >
             <MapAutoFocus target={router} />
             <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />

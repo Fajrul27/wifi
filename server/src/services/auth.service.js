@@ -73,6 +73,58 @@ class AuthService {
   }
 
   /* =========================
+     UPDATE PROFILE
+  ========================= */
+  static async updateProfile(userId, data) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) throw new Error("User tidak ditemukan");
+
+    if (data.username || data.email) {
+      const existing = await prisma.user.findFirst({
+        where: {
+          AND: [
+            { id: { not: userId } },
+            {
+              OR: [
+                { email: data.email },
+                { username: data.username },
+              ],
+            },
+          ],
+        },
+      });
+
+      if (existing) {
+        throw new Error("Email atau username sudah digunakan");
+      }
+    }
+
+    const updateData = {
+      username: data.username,
+      email: data.email,
+    };
+
+    if (data.password && data.password.trim() !== "") {
+      updateData.password = await bcrypt.hash(data.password, 10);
+    }
+
+    return await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        createdAt: true,
+      }
+    });
+  }
+
+  /* =========================
      LOGOUT (BLACKLIST TOKEN)
   ========================= */
   static async logout(token) {

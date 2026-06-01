@@ -170,6 +170,7 @@ class OltPortService {
       latitude: p.olt.latitude,
       longitude: p.olt.longitude,
       isUsed: p.isUsed,
+      roadCoordinates: p.roadCoordinates,
       createdAt: p.createdAt,
       router: p.olt.router
     }));
@@ -283,18 +284,41 @@ class OltPortService {
     // UPDATE
     // =====================================================
 
+    let roadCoordsVal = data.roadCoordinates;
+    const finalLat = data.latitude !== undefined ? (data.latitude === null || data.latitude === "" ? null : Number(data.latitude)) : (existing.latitude !== null ? Number(existing.latitude) : null);
+    const finalLng = data.longitude !== undefined ? (data.longitude === null || data.longitude === "" ? null : Number(data.longitude)) : (existing.longitude !== null ? Number(existing.longitude) : null);
+    
+    const isMoved = (data.latitude !== undefined && Number(data.latitude) !== (existing.latitude !== null ? Number(existing.latitude) : null)) ||
+                    (data.longitude !== undefined && Number(data.longitude) !== (existing.longitude !== null ? Number(existing.longitude) : null));
+
+    if (roadCoordsVal === null || (isMoved && !data.roadCoordinates)) {
+      let parentLat = null;
+      let parentLng = null;
+      const router = await prisma.router.findUnique({ where: { id: existing.routerId } });
+      if (router && router.latitude !== null && router.longitude !== null) {
+        parentLat = Number(router.latitude);
+        parentLng = Number(router.longitude);
+      }
+      
+      if (parentLat !== null && parentLng !== null && finalLat !== null && finalLng !== null) {
+        const { getRoadRoute } = require("../../../utils/routing");
+        const coords = await getRoadRoute(parentLat, parentLng, finalLat, finalLng);
+        if (coords) {
+          roadCoordsVal = JSON.stringify(coords);
+        }
+      }
+    }
+
     return await prisma.oltPort.update({
       where: {
         id: portId,
       },
-
       data: {
-
         name: data.name?.trim(),
         port: data.port?.trim(),
-
         latitude: data.latitude,
         longitude: data.longitude,
+        roadCoordinates: roadCoordsVal !== undefined ? roadCoordsVal : undefined,
       },
 
       include: {

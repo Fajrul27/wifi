@@ -73,19 +73,29 @@ class OltPortController {
           roadCoordinates: null
         };
 
-        const rLat = port.router?.latitude;
-        const rLng = port.router?.longitude;
-        const oLat = port.latitude;
-        const oLng = port.longitude;
+        if (port.roadCoordinates) {
+          try {
+            portObj.roadCoordinates = JSON.parse(port.roadCoordinates);
+          } catch (e) {
+            console.error("Failed to parse roadCoordinates:", e);
+          }
+        }
 
-        if (rLat !== null && rLng !== null && oLat !== null && oLng !== null && 
-            rLat !== undefined && rLng !== undefined && oLat !== undefined && oLng !== undefined) {
-          routeTasks.push(async () => {
-            portObj.roadCoordinates = await getRoadRoute(
-              Number(rLat), Number(rLng),
-              Number(oLat), Number(oLng)
-            );
-          });
+        if (!portObj.roadCoordinates) {
+          const rLat = port.router?.latitude;
+          const rLng = port.router?.longitude;
+          const oLat = port.latitude;
+          const oLng = port.longitude;
+
+          if (rLat !== null && rLng !== null && oLat !== null && oLng !== null && 
+              rLat !== undefined && rLng !== undefined && oLat !== undefined && oLng !== undefined) {
+            routeTasks.push(async () => {
+              portObj.roadCoordinates = await getRoadRoute(
+                Number(rLat), Number(rLng),
+                Number(oLat), Number(oLng)
+              );
+            });
+          }
         }
 
         return portObj;

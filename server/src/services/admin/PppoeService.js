@@ -3,12 +3,9 @@ const fs = require("fs");
 const pLimit = require("p-limit");
 
 const logDebug = (msg) => {
-  try {
-    fs.appendFileSync(
-      "/mnt/data170/Project_wifi/projek_old/monitoring/server/pppoe_debug.log",
-      `[${new Date().toISOString()}] ${msg}\n`
-    );
-  } catch {}
+  if (process.env.DEBUG_MODE === "true") {
+    console.log(`[PPPoE DEBUG] [${new Date().toISOString()}] ${msg}`);
+  }
 };
 
 const { broadcast } = require("../../utils/socket");
@@ -581,30 +578,57 @@ class PppoeService {
       await this.connect();
       const trafficMap = {};
       
-      // Use pLimit to limit concurrent RouterOS commands to prevent flooding
-      const limit = pLimit(5);
+      // Bulk read all interface statistics with .proplist filter (highly efficient)
+      const interfaces = await this.client.write("/interface/print", [
+        "=.proplist=name,rx-byte,tx-byte"
+      ]);
       
-      const promises = interfaceNames.map(iface => limit(async () => {
-         try {
-             const t = await this.client.write("/interface/monitor-traffic", [
-               `=interface=${iface}`,
-               "=once"
-             ]);
-             logDebug("updateRealtime: RAW MONITOR for " + iface + " = " + JSON.stringify(t));
-             const x = t?.[0];
-             if (x) {
-                trafficMap[iface] = {
-                  rx: Number(x["rx-bits-per-second"] || 0),
-                  tx: Number(x["tx-bits-per-second"] || 0)
-                };
-             }
-         } catch (e) {
-             // Silently ignore if single interface fails (e.g. disconnected)
-             trafficMap[iface] = { rx: 0, tx: 0 };
-         }
-      }));
+      const now = Date.now();
+      if (!this.prevTrafficBytes) {
+        this.prevTrafficBytes = {};
+      }
       
-      await Promise.all(promises);
+      const interfaceSet = new Set(interfaceNames);
+      
+      for (const iface of interfaces || []) {
+        const name = iface.name;
+        if (!name || !interfaceSet.has(name)) continue;
+        
+        const rxByte = Number(iface["rx-byte"] || 0);
+        const txByte = Number(iface["tx-byte"] || 0);
+        
+        const prev = this.prevTrafficBytes[name];
+        if (prev) {
+          const timeDelta = (now - prev.time) / 1000; // in seconds
+          if (timeDelta > 0) {
+            // Calculate bits-per-second (bps): (ByteDelta * 8) / TimeDelta
+            const rxBps = Math.max(0, ((rxByte - prev.rx) * 8) / timeDelta);
+            const txBps = Math.max(0, ((txByte - prev.tx) * 8) / timeDelta);
+            
+            trafficMap[name] = {
+              rx: Math.round(rxBps),
+              tx: Math.round(txBps)
+            };
+          } else {
+            trafficMap[name] = { rx: 0, tx: 0 };
+          }
+        } else {
+          trafficMap[name] = { rx: 0, tx: 0 };
+        }
+        
+        this.prevTrafficBytes[name] = {
+          rx: rxByte,
+          tx: txByte,
+          time: now
+        };
+      }
+      
+      // Fill defaults for interfaces not found
+      for (const name of interfaceNames) {
+        if (!trafficMap[name]) {
+          trafficMap[name] = { rx: 0, tx: 0 };
+        }
+      }
       
       return trafficMap;
     } catch (err) {
@@ -648,68 +672,50 @@ class PppoeService {
         }
       );
 
-    /* CREATE / UPDATE */
-    for (const s of secrets ||
-      []) {
-      const username = String(
-        s.name || ""
-      ).trim();
+    /* CREATE / UPDATE (BATCHED) */
+    const toUpdate = [];
+    const toCreate = [];
 
-      if (!username)
-        continue;
+    const dbUserMap = new Map();
+    for (const u of dbUsers) {
+      dbUserMap.set(u.username, u);
+    }
 
-      const existing =
-        dbUsers.find(
-          (u) =>
-            u.username ===
-            username
-        );
+    for (const s of secrets || []) {
+      const username = String(s.name || "").trim();
+      if (!username) continue;
+
+      const existing = dbUserMap.get(username);
 
       if (existing) {
-        await prisma.pppoeUser.update(
-          {
-            where: {
-              id: existing.id,
-            },
-            data: {
-              profile:
-                s.profile ||
-                null,
-            },
-          }
-        );
-
-        updated++;
+        if (existing.profile !== (s.profile || null)) {
+          toUpdate.push({
+            where: { id: existing.id },
+            data: { profile: s.profile || null },
+          });
+          updated++;
+        }
       } else {
-        await prisma.pppoeUser.create(
-          {
-            data: {
-              routerId:
-                this.router.id,
-
-              username,
-
-              profile:
-                s.profile ||
-                null,
-
-              isOnline: false,
-            },
-          }
-        );
-
+        toCreate.push({
+          routerId: this.router.id,
+          username,
+          profile: s.profile || null,
+          isOnline: false,
+        });
         created++;
       }
     }
 
+    if (toUpdate.length > 0 || toCreate.length > 0) {
+      await prisma.$transaction([
+        ...toUpdate.map((u) => prisma.pppoeUser.update(u)),
+        ...(toCreate.length > 0 ? [prisma.pppoeUser.createMany({ data: toCreate })] : []),
+      ]);
+    }
+
     /* DELETE USER */
-    const deletedUsers =
-      dbUsers.filter(
-        (u) =>
-          !routerUsernames.includes(
-            u.username
-          )
-      );
+    const routerUsernameSet = new Set(routerUsernames);
+    const deletedUsers = dbUsers.filter((u) => !routerUsernameSet.has(u.username));
 
     if (
       deletedUsers.length > 0
@@ -842,6 +848,28 @@ class PppoeService {
               routerId:
                 this.router.id,
             },
+            select: {
+              id: true,
+              username: true,
+              profile: true,
+              isOnline: true,
+              lastSeen: true,
+              createdAt: true,
+              localAddress: true,
+              remoteAddress: true,
+              latitude: true,
+              longitude: true,
+              roadCoordinates: true,
+              whatsapp: true,
+              photoUrl: true,
+              photoUrl2: true,
+              photoUrl3: true,
+              odpPort: {
+                select: {
+                  odpId: true
+                }
+              }
+            }
           }
         );
 
@@ -856,10 +884,13 @@ class PppoeService {
       const trafficMap = await this.getMultipleInterfacesTraffic(activeInterfaces);
       logDebug("updateRealtime: trafficMap=" + JSON.stringify(trafficMap));
 
+      const dbUpdates = [];
+
       const realtimeUsers =
         await Promise.all(
           users.map(
             async (user) => {
+              let dbUser = user;
               const userKey = normalizeKey(user.username);
               const active = activeMap[userKey];
               logDebug("updateRealtime: user=" + user.username + " (key=" + userKey + ") active=" + !!active);
@@ -892,39 +923,22 @@ class PppoeService {
                 user.remoteAddress !== remoteAddress ||
                 (isOnline && (!user.lastSeen || Date.now() - new Date(user.lastSeen).getTime() > 300000));
 
-              let dbUser = user;
               if (needsDbUpdate) {
-                try {
-                  // Log only if this is a genuine status transition not yet recorded
-                  const lastKnown = this.knownOnlineStatus.get(user.id);
-                  if (lastKnown === undefined || lastKnown !== isOnline) {
-                    this.knownOnlineStatus.set(user.id, isOnline);
-                    const LogService = require("../../services/admin/LogService");
-                    LogService.addLog(
-                      `Client ${user.username} is now ${isOnline ? 'Online' : 'Offline'}`,
-                      isOnline ? 'success' : 'danger'
-                    ).catch(console.error);
-                  }
-
-                  dbUser = await prisma.pppoeUser.update({
-                    where: { id: user.id },
-                    data: {
-                      isOnline,
-                      localAddress,
-                      remoteAddress,
-                      lastSeen: updatedLastSeen
-                    }
-                  });
-                  
-                  // 🔥 FIX: Update the in-memory cache so it doesn't log again on next tick!
-                  if (usersCache[this.router.id]) {
-                    usersCache[this.router.id].set(user.id, dbUser);
-                  }
-                  
-                  logDebug("updateRealtime: user=" + user.username + " updated in db");
-                } catch (dbErr) {
-                  console.error("[PPPoE DB Error]", dbErr.message);
-                }
+                dbUpdates.push({
+                  id: user.id,
+                  username: user.username,
+                  isOnline,
+                  localAddress,
+                  remoteAddress,
+                  lastSeen: updatedLastSeen
+                });
+                dbUser = {
+                  ...user,
+                  isOnline,
+                  localAddress,
+                  remoteAddress,
+                  lastSeen: updatedLastSeen
+                };
               }
 
               let downtime = null;
@@ -938,6 +952,7 @@ class PppoeService {
 
               return {
                 id: user.id,
+                routerId: this.router.id,
                 username: user.username,
                 profile: user.profile,
                 disabled,
@@ -953,32 +968,79 @@ class PppoeService {
                 remoteAddress,
                 latitude: user.latitude ?? null,
                 longitude: user.longitude ?? null,
+                whatsapp: user.whatsapp ?? null,
+                address: user.address ?? null,
+                photoUrl: user.photoUrl ?? null,
+                photoUrl2: user.photoUrl2 ?? null,
+                photoUrl3: user.photoUrl3 ?? null,
+                topologyNodeId: user.odpPort?.odpId ? (user.odpPort.odpId + 100000) : null,
+                roadCoordinates: (() => {
+                  if (!user.roadCoordinates) return null;
+                  try {
+                    return JSON.parse(user.roadCoordinates);
+                  } catch (e) {
+                    console.error("Failed to parse user.roadCoordinates:", e.message);
+                    return null;
+                  }
+                })(),
               };
             }
           )
         );
 
        logDebug("updateRealtime: broadcasting " + realtimeUsers.length + " users");
+      this.cachedRealtimeUsers = realtimeUsers;
       const serialized = serialize(realtimeUsers);
-      broadcast({
-        type:
-          "pppoe-realtime",
-
-        routerId:
-          this.router.id,
-
+      
+      const payload = {
+        type: "pppoe-realtime",
+        routerId: this.router.id,
         data: serialized,
-
         ts: Date.now(),
-      });
+      };
+
+      broadcast(payload);
 
       if (global.io) {
         const room = `router:${this.router.id}`;
-        global.io.to(room).emit("pppoe-realtime", {
-          type: "pppoe-realtime",
-          routerId: this.router.id,
-          data: serialized,
-          ts: Date.now(),
+        global.io.to(room).emit("pppoe-realtime", payload);
+      }
+
+      // ==========================================
+      // BATCH DB UPDATES
+      // ==========================================
+      if (dbUpdates.length > 0) {
+        logDebug("updateRealtime: batch updating " + dbUpdates.length + " users in DB");
+        const LogService = require("../../services/admin/LogService");
+
+        // Fire-and-forget DB update transaction to prevent blocking the tick
+        prisma.$transaction(
+          dbUpdates.map((u) => {
+            const lastKnown = this.knownOnlineStatus.get(u.id);
+            if (lastKnown === undefined || lastKnown !== u.isOnline) {
+              this.knownOnlineStatus.set(u.id, u.isOnline);
+              LogService.addLog(
+                `Client ${u.username} is now ${u.isOnline ? "Online" : "Offline"}`,
+                u.isOnline ? "success" : "danger"
+              ).catch(() => {});
+            }
+
+            if (usersCache[this.router.id]) {
+              usersCache[this.router.id].set(u.id, u);
+            }
+
+            return prisma.pppoeUser.update({
+              where: { id: u.id },
+              data: {
+                isOnline: u.isOnline,
+                localAddress: u.localAddress,
+                remoteAddress: u.remoteAddress,
+                lastSeen: u.lastSeen,
+              },
+            });
+          })
+        ).catch(err => {
+          console.error("[PPPoE Batch DB Error]", err.message);
         });
       }
       logDebug("updateRealtime: successfully finished!");
@@ -1014,14 +1076,14 @@ class PppoeService {
           console.error
         );
       },
-      2000
+      5000
     );
   }
 
   /* =========================
      STOP REALTIME
   ========================= */
-  stopAutoRealtime() {
+  async stopAutoRealtime() {
     if (this.interval) {
       clearInterval(
         this.interval
@@ -1029,8 +1091,16 @@ class PppoeService {
     }
 
     this.interval = null;
-
     this.isRunning = false;
+
+    if (this.client) {
+      try {
+        await this.client.close();
+        this.isConnected = false;
+      } catch (e) {
+        console.error("[PPPoE] Error closing RouterOS client:", e.message);
+      }
+    }
   }
 }
 

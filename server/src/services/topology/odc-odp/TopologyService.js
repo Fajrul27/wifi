@@ -1,5 +1,8 @@
 const prisma = require("../../../utils/prisma");
 
+
+const { deleteImage } = require("../../../utils/cloudinary");
+
 // =====================================================
 // UTIL
 // =====================================================
@@ -217,16 +220,10 @@ async createOdc(data) {
   // =====================================================
 
   async getOdcTree(oltPortId) {
-
     const id = toInt(oltPortId, "oltPortId");
 
-    // Ambil hanya ROOT ODC (yang langsung terhubung ke OLT port)
-    // Child ODC tidak memiliki oltPortId — mereka diidentifikasi via parentOdcId
-    const rootOdcs = await prisma.odc.findMany({
-      where: {
-        oltPortId: id,
-        parentOdcId: null,   // ← pastikan hanya root
-      },
+    // Fetch ALL ODCs with their ports and ODPs in ONE SINGLE BULK QUERY
+    const allOdcs = await prisma.odc.findMany({
       include: {
         ports: { orderBy: { index: "asc" } },
         odps: {
@@ -238,50 +235,64 @@ async createOdc(data) {
       orderBy: { id: "asc" },
     });
 
-    // Ambil semua ODC lain via parentOdcId (rekursif)
-    const buildSubtree = async (odcList) => {
+    // Build parent-child mapping and filter root ODCs in RAM
+    const rootOdcs = [];
+    const childMap = new Map(); // parentOdcId -> children list
+
+    for (const odc of allOdcs) {
+      if (odc.oltPortId === id && odc.parentOdcId === null) {
+        rootOdcs.push(odc);
+      }
+      if (odc.parentOdcId !== null) {
+        if (!childMap.has(odc.parentOdcId)) {
+          childMap.set(odc.parentOdcId, []);
+        }
+        childMap.get(odc.parentOdcId).push(odc);
+      }
+    }
+
+    // Collect all ODP IDs connected to ODC ports to fetch details in bulk
+    const connectedOdpIds = new Set();
+    for (const odc of allOdcs) {
+      for (const port of odc.ports) {
+        if (port.connectionType === "ODP" && port.connectedOdpId) {
+          connectedOdpIds.add(port.connectedOdpId);
+        }
+      }
+    }
+
+    const odpDetailsMap = new Map();
+    if (connectedOdpIds.size > 0) {
+      const odps = await prisma.odp.findMany({
+        where: { id: { in: Array.from(connectedOdpIds) } },
+        include: { ports: { include: { user: true }, orderBy: { index: "asc" } } },
+      });
+      for (const odp of odps) {
+        odpDetailsMap.set(odp.id, odp);
+      }
+    }
+
+    // Populate connectedOdp for all ODC ports in-memory
+    for (const odc of allOdcs) {
+      for (const port of odc.ports) {
+        port.connectedOdp = (port.connectionType === "ODP" && port.connectedOdpId)
+          ? (odpDetailsMap.get(port.connectedOdpId) ?? null)
+          : null;
+      }
+    }
+
+    // Recursively build tree completely in-memory (O(N) complexity)
+    const buildSubtreeInMemory = (odcList) => {
       const result = [];
       for (const odc of odcList) {
-        const children = await prisma.odc.findMany({
-          where: { parentOdcId: odc.id },
-          include: {
-            ports: { orderBy: { index: "asc" } },
-            odps: {
-              include: {
-                ports: { include: { user: true }, orderBy: { index: "asc" } },
-              },
-            },
-          },
-          orderBy: { id: "asc" },
-        });
-        const childrenWithSub = await buildSubtree(children);
-
-        // Kumpulkan connectedOdpId dari ports
-        const odpIds = odc.ports
-          .filter(p => p.connectionType === "ODP" && p.connectedOdpId)
-          .map(p => p.connectedOdpId);
-
-        let odpMap = {};
-        if (odpIds.length > 0) {
-          const odps = await prisma.odp.findMany({
-            where: { id: { in: odpIds } },
-            include: { ports: { include: { user: true }, orderBy: { index: "asc" } } },
-          });
-          for (const odp of odps) odpMap[odp.id] = odp;
-        }
-
-        for (const port of odc.ports) {
-          port.connectedOdp = (port.connectionType === "ODP" && port.connectedOdpId)
-            ? (odpMap[port.connectedOdpId] ?? null)
-            : null;
-        }
-
+        const children = childMap.get(odc.id) || [];
+        const childrenWithSub = buildSubtreeInMemory(children);
         result.push({ ...odc, children: childrenWithSub });
       }
       return result;
     };
 
-    return buildSubtree(rootOdcs);
+    return buildSubtreeInMemory(rootOdcs);
   }
 
   // =====================================================
@@ -353,6 +364,49 @@ async createOdc(data) {
       const toCoordUpdate = (v) =>
         v === undefined ? undefined : (v === null || v === "" ? null : Number(v));
 
+      if (data.photoUrl !== undefined && odc.photoUrl && data.photoUrl !== odc.photoUrl) {
+          deleteImage(odc.photoUrl);
+      }
+      if (data.photoUrl2 !== undefined && odc.photoUrl2 && data.photoUrl2 !== odc.photoUrl2) {
+          deleteImage(odc.photoUrl2);
+      }
+      if (data.photoUrl3 !== undefined && odc.photoUrl3 && data.photoUrl3 !== odc.photoUrl3) {
+          deleteImage(odc.photoUrl3);
+      }
+
+      let roadCoordsVal = data.roadCoordinates;
+      const finalLat = data.latitude !== undefined ? toCoordUpdate(data.latitude) : (odc.latitude !== null ? Number(odc.latitude) : null);
+      const finalLng = data.longitude !== undefined ? toCoordUpdate(data.longitude) : (odc.longitude !== null ? Number(odc.longitude) : null);
+      
+      const isMoved = (data.latitude !== undefined && toCoordUpdate(data.latitude) !== (odc.latitude !== null ? Number(odc.latitude) : null)) ||
+                      (data.longitude !== undefined && toCoordUpdate(data.longitude) !== (odc.longitude !== null ? Number(odc.longitude) : null));
+
+      if (roadCoordsVal === null || (isMoved && !data.roadCoordinates)) {
+        let parentLat = null;
+        let parentLng = null;
+        if (odc.oltPortId) {
+          const port = await tx.oltPort.findUnique({ where: { id: odc.oltPortId } });
+          if (port && port.latitude !== null && port.longitude !== null) {
+            parentLat = Number(port.latitude);
+            parentLng = Number(port.longitude);
+          }
+        } else if (odc.parentOdcId) {
+          const parentOdc = await tx.odc.findUnique({ where: { id: odc.parentOdcId } });
+          if (parentOdc && parentOdc.latitude !== null && parentOdc.longitude !== null) {
+            parentLat = Number(parentOdc.latitude);
+            parentLng = Number(parentOdc.longitude);
+          }
+        }
+        
+        if (parentLat !== null && parentLng !== null && finalLat !== null && finalLng !== null) {
+          const { getRoadRoute } = require("../../../utils/routing");
+          const coords = await getRoadRoute(parentLat, parentLng, finalLat, finalLng);
+          if (coords) {
+            roadCoordsVal = JSON.stringify(coords);
+          }
+        }
+      }
+
       return tx.odc.update({
         where: {
           id: odcId,
@@ -362,6 +416,12 @@ async createOdc(data) {
           latitude: toCoordUpdate(data.latitude),
           longitude: toCoordUpdate(data.longitude),
           splitRatio: data.splitRatio,
+          ...(data.photoUrl !== undefined && { photoUrl: data.photoUrl }),
+          ...(data.photoUrl2 !== undefined && { photoUrl2: data.photoUrl2 }),
+          ...(data.photoUrl3 !== undefined && { photoUrl3: data.photoUrl3 }),
+          ...(data.whatsapp !== undefined && { whatsapp: data.whatsapp }),
+          ...(data.address !== undefined && { address: data.address }),
+          roadCoordinates: roadCoordsVal,
         },
       });
     });
@@ -379,29 +439,92 @@ async createOdc(data) {
 
     const odc = await tx.odc.findUnique({
       where: { id: odcId },
-      include: { ports: true },
     });
 
     if (!odc) {
       throw new Error("ODC tidak ditemukan");
     }
+    
+    if (odc.photoUrl) deleteImage(odc.photoUrl);
+    if (odc.photoUrl2) deleteImage(odc.photoUrl2);
+    if (odc.photoUrl3) deleteImage(odc.photoUrl3);
 
-    const hasUsedPort = odc.ports.some((p) => p.isUsed);
+    // =====================================================
+    // RECURSIVE: Collect ALL descendant ODC IDs
+    // =====================================================
+    const collectAllDescendantIds = async (rootId) => {
+      const all = [];
+      const queue = [rootId];
+      while (queue.length > 0) {
+        const current = queue.shift();
+        const children = await tx.odc.findMany({
+          where: { parentOdcId: current },
+          select: { id: true },
+        });
+        for (const c of children) {
+          all.push(c.id);
+          queue.push(c.id);
+        }
+      }
+      return all;
+    };
 
-    const userCount = await tx.pppoeUser.count({
-      where: {
-        odpPort: {
-          odp: { odcId },
-        },
-      },
+    const descendantIds = await collectAllDescendantIds(odcId);
+    const allOdcIds = [odcId, ...descendantIds];
+
+    // =====================================================
+    // 1. Unassign all users from ODP ports under these ODCs
+    // =====================================================
+    const odpsToDelete = await tx.odp.findMany({
+      where: { odcId: { in: allOdcIds } },
+      select: { id: true },
     });
+    const odpIdsToDelete = odpsToDelete.map((o) => o.id);
 
-    if (hasUsedPort || userCount > 0) {
-      throw new Error("ODC masih digunakan di topology");
+    if (odpIdsToDelete.length > 0) {
+      // Unassign users
+      await tx.pppoeUser.updateMany({
+        where: { odpPort: { odpId: { in: odpIdsToDelete } } },
+        data: { odpPortId: null },
+      });
+      // Delete ODP ports
+      await tx.odpPort.deleteMany({
+        where: { odpId: { in: odpIdsToDelete } },
+      });
+      // Delete ODPs
+      await tx.odp.deleteMany({
+        where: { id: { in: odpIdsToDelete } },
+      });
     }
 
     // =====================================================
-    // RELEASE PARENT OLT PORT (hanya untuk root ODC)
+    // 2. Delete all ODC ports for all affected ODCs
+    // =====================================================
+    await tx.odcPort.deleteMany({
+      where: { odcId: { in: allOdcIds } },
+    });
+
+    // Release any parent ODC port that references this ODC
+    await tx.odcPort.updateMany({
+      where: { connectedOdcId: { in: allOdcIds } },
+      data: {
+        isUsed: false,
+        connectionType: "NONE",
+        connectedOdcId: null,
+      },
+    });
+
+    // =====================================================
+    // 3. Delete descendant ODCs first (leaves → root order)
+    // =====================================================
+    if (descendantIds.length > 0) {
+      await tx.odc.deleteMany({
+        where: { id: { in: descendantIds } },
+      });
+    }
+
+    // =====================================================
+    // 4. Release OLT port (for root ODC)
     // =====================================================
     if (odc.oltPortId) {
       await tx.oltPort.update({
@@ -410,20 +533,9 @@ async createOdc(data) {
       });
     }
 
-    // Release parent ODC port yang mereferensikan ODC ini (untuk child ODC)
-    await tx.odcPort.updateMany({
-      where: { connectedOdcId: odcId },
-      data: {
-        isUsed: false,
-        connectionType: "NONE",
-        connectedOdcId: null,
-      },
-    });
-
-    await tx.odcPort.deleteMany({
-      where: { odcId },
-    });
-
+    // =====================================================
+    // 5. Delete root ODC
+    // =====================================================
     return tx.odc.delete({
       where: { id: odcId },
     });
@@ -606,6 +718,43 @@ async createOdc(data) {
       const toCoordUpdate = (v) =>
         v === undefined ? undefined : (v === null || v === "" ? null : Number(v));
 
+      if (data.photoUrl !== undefined && odp.photoUrl && data.photoUrl !== odp.photoUrl) {
+          deleteImage(odp.photoUrl);
+      }
+      if (data.photoUrl2 !== undefined && odp.photoUrl2 && data.photoUrl2 !== odp.photoUrl2) {
+          deleteImage(odp.photoUrl2);
+      }
+      if (data.photoUrl3 !== undefined && odp.photoUrl3 && data.photoUrl3 !== odp.photoUrl3) {
+          deleteImage(odp.photoUrl3);
+      }
+
+      let roadCoordsVal = data.roadCoordinates;
+      const finalLat = data.latitude !== undefined ? toCoordUpdate(data.latitude) : (odp.latitude !== null ? Number(odp.latitude) : null);
+      const finalLng = data.longitude !== undefined ? toCoordUpdate(data.longitude) : (odp.longitude !== null ? Number(odp.longitude) : null);
+      
+      const isMoved = (data.latitude !== undefined && toCoordUpdate(data.latitude) !== (odp.latitude !== null ? Number(odp.latitude) : null)) ||
+                      (data.longitude !== undefined && toCoordUpdate(data.longitude) !== (odp.longitude !== null ? Number(odp.longitude) : null));
+
+      if (roadCoordsVal === null || (isMoved && !data.roadCoordinates)) {
+        let parentLat = null;
+        let parentLng = null;
+        if (odp.odcId) {
+          const parent = await tx.odc.findUnique({ where: { id: odp.odcId } });
+          if (parent && parent.latitude !== null && parent.longitude !== null) {
+            parentLat = Number(parent.latitude);
+            parentLng = Number(parent.longitude);
+          }
+        }
+        
+        if (parentLat !== null && parentLng !== null && finalLat !== null && finalLng !== null) {
+          const { getRoadRoute } = require("../../../utils/routing");
+          const coords = await getRoadRoute(parentLat, parentLng, finalLat, finalLng);
+          if (coords) {
+            roadCoordsVal = JSON.stringify(coords);
+          }
+        }
+      }
+
       return tx.odp.update({
         where: {
           id: odpId,
@@ -615,6 +764,12 @@ async createOdc(data) {
           latitude: toCoordUpdate(data.latitude),
           longitude: toCoordUpdate(data.longitude),
           splitRatio: data.splitRatio,
+          ...(data.photoUrl !== undefined && { photoUrl: data.photoUrl }),
+          ...(data.photoUrl2 !== undefined && { photoUrl2: data.photoUrl2 }),
+          ...(data.photoUrl3 !== undefined && { photoUrl3: data.photoUrl3 }),
+          ...(data.whatsapp !== undefined && { whatsapp: data.whatsapp }),
+          ...(data.address !== undefined && { address: data.address }),
+          roadCoordinates: roadCoordsVal,
         },
         include: {
           odc: true,
@@ -835,31 +990,30 @@ async getOdpsByPort(portId) {
     return prisma.$transaction(async (tx) => {
 
       const odp = await tx.odp.findUnique({
-        where: {
-          id: odpId,
-        },
-        include: {
-          ports: true,
-        },
+        where: { id: odpId },
+        include: { ports: true },
       });
 
       if (!odp) {
         throw new Error("ODP tidak ditemukan");
       }
+      
+      if (odp.photoUrl) deleteImage(odp.photoUrl);
+      if (odp.photoUrl2) deleteImage(odp.photoUrl2);
+      if (odp.photoUrl3) deleteImage(odp.photoUrl3);
 
-      const usedPort = odp.ports.some(
-        (p) => p.isUsed
-      );
-
-      if (usedPort) {
-        throw new Error("ODP masih memiliki user");
+      // Force-unassign all users from this ODP's ports (do NOT block delete)
+      const portIds = odp.ports.map((p) => p.id);
+      if (portIds.length > 0) {
+        await tx.pppoeUser.updateMany({
+          where: { odpPortId: { in: portIds } },
+          data: { odpPortId: null },
+        });
       }
 
-      // release ODC port
+      // Release ODC port that references this ODP
       await tx.odcPort.updateMany({
-        where: {
-          connectedOdpId: odpId,
-        },
+        where: { connectedOdpId: odpId },
         data: {
           isUsed: false,
           connectionType: "NONE",
@@ -867,27 +1021,13 @@ async getOdpsByPort(portId) {
         },
       });
 
-      await tx.pppoeUser.updateMany({
-        where: {
-          odpPort: {
-            odpId,
-          },
-        },
-        data: {
-          odpPortId: null,
-        },
-      });
-
+      // Delete ODP ports
       await tx.odpPort.deleteMany({
-        where: {
-          odpId,
-        },
+        where: { odpId },
       });
 
       return tx.odp.delete({
-        where: {
-          id: odpId,
-        },
+        where: { id: odpId },
       });
     });
   }

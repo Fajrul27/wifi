@@ -1,4 +1,6 @@
 const PppoeService = require("../../services/admin/PppoeService");
+
+const { deleteImage } = require("../../utils/cloudinary");
 const prisma = require("../../utils/prisma");
 const { getRoadRoute } = require("../../utils/routing");
 
@@ -217,7 +219,13 @@ controller.getUsers =
       const service =
         getService(router);
 
-      await service.syncUsers();
+      // Serve from background cache immediately if available! (Ultra-fast, non-blocking)
+      if (service.cachedRealtimeUsers && service.cachedRealtimeUsers.length > 0) {
+        return res.json({
+          success: true,
+          data: serialize(service.cachedRealtimeUsers),
+        });
+      }
 
       await service.connect();
 
@@ -267,9 +275,7 @@ controller.getUsers =
 
       const trafficMap = await service.getMultipleInterfacesTraffic(activeInterfaces);
 
-      const odps = await prisma.odp.findMany();
       const result = [];
-      const routeTasks = [];
 
       for (const u of users) {
         const active =
@@ -354,27 +360,25 @@ controller.getUsers =
             u.longitude ??
             null,
 
+          whatsapp: u.whatsapp || null,
+          photoUrl: u.photoUrl || null,
+          photoUrl2: u.photoUrl2 || null,
+          photoUrl3: u.photoUrl3 || null,
+
           topologyNodeId: u.odpPort?.odpId ? (u.odpPort.odpId + 100000) : null,
           roadCoordinates: null
         };
 
-        if (u.odpPort?.odpId && u.latitude !== null && u.longitude !== null) {
-          const odp = odps.find(o => o.id === u.odpPort.odpId);
-          if (odp && odp.latitude !== null && odp.longitude !== null) {
-            routeTasks.push(async () => {
-              userObj.roadCoordinates = await getRoadRoute(
-                Number(odp.latitude), Number(odp.longitude),
-                Number(u.latitude), Number(u.longitude)
-              );
-            });
+        if (u.roadCoordinates) {
+          try {
+            userObj.roadCoordinates = JSON.parse(u.roadCoordinates);
+          } catch (e) {
+            console.error("Failed to parse client roadCoordinates:", e);
           }
         }
 
         result.push(userObj);
       }
-
-      // Execute routing calls in parallel (controlled by getRoadRoute throttle)
-      await Promise.all(routeTasks.map(t => t()));
 
       res.json({
         success: true,
@@ -740,7 +744,13 @@ controller.updateUser = async (req, res) => {
     if (req.body.profile !== undefined) dbUpdateData.profile = req.body.profile;
     if (req.body["local-address"] !== undefined) dbUpdateData.localAddress = req.body["local-address"] || null;
     if (req.body["remote-address"] !== undefined) dbUpdateData.remoteAddress = req.body["remote-address"] || null;
-
+    
+    // Info Lapangan
+    if (req.body.whatsapp !== undefined) dbUpdateData.whatsapp = req.body.whatsapp || null;
+    if (req.body.address !== undefined) dbUpdateData.address = req.body.address || null;
+    if (req.body.photoUrl !== undefined) dbUpdateData.photoUrl = req.body.photoUrl || null;
+    if (req.body.photoUrl2 !== undefined) dbUpdateData.photoUrl2 = req.body.photoUrl2 || null;
+    if (req.body.photoUrl3 !== undefined) dbUpdateData.photoUrl3 = req.body.photoUrl3 || null;
     const dbUser = await prisma.pppoeUser.findUnique({
       where: {
         routerId_username: {
@@ -748,9 +758,55 @@ controller.updateUser = async (req, res) => {
           username,
         },
       },
+      include: {
+        odpPort: {
+          include: {
+            odp: true
+          }
+        }
+      }
     });
 
     if (dbUser) {
+      if (req.body.photoUrl !== undefined && dbUser.photoUrl && req.body.photoUrl !== dbUser.photoUrl) {
+          deleteImage(dbUser.photoUrl);
+      }
+      if (req.body.photoUrl2 !== undefined && dbUser.photoUrl2 && req.body.photoUrl2 !== dbUser.photoUrl2) {
+          deleteImage(dbUser.photoUrl2);
+      }
+      if (req.body.photoUrl3 !== undefined && dbUser.photoUrl3 && req.body.photoUrl3 !== dbUser.photoUrl3) {
+          deleteImage(dbUser.photoUrl3);
+      }
+
+      let roadCoordsVal = req.body.roadCoordinates;
+      const finalLat = req.body.latitude !== undefined ? (req.body.latitude === null || req.body.latitude === "" ? null : Number(req.body.latitude)) : (dbUser.latitude !== null ? Number(dbUser.latitude) : null);
+      const finalLng = req.body.longitude !== undefined ? (req.body.longitude === null || req.body.longitude === "" ? null : Number(req.body.longitude)) : (dbUser.longitude !== null ? Number(dbUser.longitude) : null);
+      
+      const isMoved = (req.body.latitude !== undefined && Number(req.body.latitude) !== (dbUser.latitude !== null ? Number(dbUser.latitude) : null)) ||
+                      (req.body.longitude !== undefined && Number(req.body.longitude) !== (dbUser.longitude !== null ? Number(dbUser.longitude) : null));
+
+      if (roadCoordsVal === null || (isMoved && !req.body.roadCoordinates)) {
+        let parentLat = null;
+        let parentLng = null;
+        const connectedOdp = dbUser.odpPort?.odp;
+        if (connectedOdp && connectedOdp.latitude !== null && connectedOdp.longitude !== null) {
+          parentLat = Number(connectedOdp.latitude);
+          parentLng = Number(connectedOdp.longitude);
+        }
+        
+        if (parentLat !== null && parentLng !== null && finalLat !== null && finalLng !== null) {
+          const { getRoadRoute } = require("../../utils/routing");
+          const coords = await getRoadRoute(parentLat, parentLng, finalLat, finalLng);
+          if (coords) {
+            roadCoordsVal = JSON.stringify(coords);
+          }
+        }
+      }
+
+      if (roadCoordsVal !== undefined) {
+        dbUpdateData.roadCoordinates = roadCoordsVal;
+      }
+      
       await prisma.pppoeUser.update({
         where: {
           id: dbUser.id,

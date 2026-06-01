@@ -293,6 +293,7 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
           zoomControl={true}
           attributionControl={false}
           scrollWheelZoom={true}
+          keyboard={false}
         >
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

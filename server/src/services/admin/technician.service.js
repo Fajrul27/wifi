@@ -6,10 +6,12 @@ class TechnicianService {
   /* =========================
      CREATE TEKNISI (ADMIN ONLY)
   ========================= */
-  static async create(adminUser, username, email, password) {
+  static async create(adminUser, data) {
     if (adminUser.role !== "ADMIN") {
       throw new Error("Akses ditolak");
     }
+
+    const { username, email, password, status, area, phone } = data;
 
     const existing = await prisma.user.findFirst({
       where: {
@@ -29,6 +31,9 @@ class TechnicianService {
         email,
         password: hashed,
         role: "TEKNISI",
+        status: status || "AKTIF",
+        area: area || null,
+        phone: phone || null,
       },
     });
   }
@@ -44,9 +49,37 @@ class TechnicianService {
         username: true,
         email: true,
         role: true,
+        status: true,
+        area: true,
+        phone: true,
         createdAt: true,
       },
     });
+  }
+
+  /* =========================
+     GET BY ID TEKNISI
+  ========================= */
+  static async getById(id) {
+    const user = await prisma.user.findUnique({
+      where: { id, role: "TEKNISI" },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        status: true,
+        area: true,
+        phone: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new Error("User teknisi tidak ditemukan");
+    }
+
+    return user;
   }
 
   /* =========================
@@ -91,10 +124,22 @@ class TechnicianService {
       data: {
         username: data.username,
         email: data.email,
+        ...(data.status !== undefined && { status: data.status }),
+        ...(data.area !== undefined && { area: data.area }),
+        ...(data.phone !== undefined && { phone: data.phone }),
         ...(data.password && {
           password: await bcrypt.hash(data.password, 10),
         }),
       },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        status: true,
+        area: true,
+        phone: true,
+      }
     });
   }
 

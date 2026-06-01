@@ -7,13 +7,9 @@ cron.schedule("0 2 * * *", async () => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const result = await prisma.routerMetric.deleteMany({
-      where: {
-        createdAt: {
-          lt: sevenDaysAgo,
-        },
-      },
-    });
+    // RouterMetric model no longer exists in schema,
+    // logging cleanup is already handled gracefully by LogService.
+    const result = { count: 0 };
 
     console.log(`🧹 Daily cleanup: ${result.count} records deleted`);
   } catch (err) {

@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "./AdminDashboard.css";
 import L from "leaflet";
@@ -11,6 +11,69 @@ import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
 import DashboardSystemLogs from "./components/DashboardSystemLogs";
 
+// Utility to calculate the distance from a point to a segment
+const getDistanceToSegment = (p, a, b) => {
+  const x = p[0], y = p[1];
+  const x1 = a[0], y1 = a[1];
+  const x2 = b[0], y2 = b[1];
+  
+  const A = x - x1;
+  const B = y - y1;
+  const C = x2 - x1;
+  const D = y2 - y1;
+  
+  const dot = A * C + B * D;
+  const lenSq = C * C + D * D;
+  let param = -1;
+  if (lenSq !== 0) {
+    param = dot / lenSq;
+  }
+  
+  let xx, yy;
+  if (param < 0) {
+    xx = x1;
+    yy = y1;
+  } else if (param > 1) {
+    xx = x2;
+    yy = y2;
+  } else {
+    xx = x1 + param * C;
+    yy = y1 + param * D;
+  }
+  
+  const dx = x - xx;
+  const dy = y - yy;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+// Utility to find the best insertion index for a new point along the existing vertices path
+const findInsertionIndex = (clickLatLng, vertices) => {
+  if (vertices.length <= 2) return 1;
+  let minDistance = Infinity;
+  let insertionIndex = 1;
+  
+  const p = [clickLatLng.lat, clickLatLng.lng];
+  for (let i = 0; i < vertices.length - 1; i++) {
+    const dist = getDistanceToSegment(p, vertices[i], vertices[i+1]);
+    if (dist < minDistance) {
+      minDistance = dist;
+      insertionIndex = i + 1;
+    }
+  }
+  return insertionIndex;
+};
+
+function MapClickHandler({ onClick }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!onClick) return;
+    map.on('click', onClick);
+    return () => {
+      map.off('click', onClick);
+    };
+  }, [map, onClick]);
+  return null;
+}
 
 export default function AdminDashboard({ 
   routers: propRouters = [], 
@@ -109,9 +172,62 @@ export default function AdminDashboard({
   const addLogEvent = useCallback((message, type = 'info') => {
     setEventLogs(prev => {
       const newLogs = [{ id: Date.now(), time: new Date(), message, type }, ...prev];
-      return newLogs.slice(0, 50); // keep last 50
+      return newLogs.slice(0, 100); // keep last 100
     });
   }, []);
+
+  const [editEntity, setEditEntity] = useState(null);
+  const [editForm, setEditForm] = useState({ whatsapp: "", address: "", photoUrl: "", file: null });
+  const [isUploading, setIsUploading] = useState(false);
+  const [lightbox, setLightbox] = useState({ isOpen: false, index: 0, images: [] });
+
+  const [selectedCable, setSelectedCable] = useState(null);
+  const [editingCable, setEditingCable] = useState(null);
+  const [cableVertices, setCableVertices] = useState([]);
+  const [activeGroupDetailNode, setActiveGroupDetailNode] = useState(null);
+  const [cableHistory, setCableHistory] = useState([]);
+  const [customAlert, setCustomAlert] = useState({ show: false, title: "", message: "", type: "info" });
+  const [customConfirm, setCustomConfirm] = useState({ show: false, title: "", message: "", onConfirm: null, onCancel: null });
+
+  const showAlert = useCallback((message, title = "Notifikasi", type = "info") => {
+    setCustomAlert({ show: true, title, message, type });
+  }, []);
+
+  const showConfirm = useCallback((message, onConfirm, title = "Konfirmasi") => {
+    setCustomConfirm({
+      show: true,
+      title,
+      message,
+      onConfirm: () => {
+        onConfirm();
+        setCustomConfirm(prev => ({ ...prev, show: false }));
+      },
+      onCancel: () => {
+        setCustomConfirm(prev => ({ ...prev, show: false }));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!lightbox.isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setLightbox(prev => ({ ...prev, isOpen: false }));
+      } else if (e.key === "ArrowLeft") {
+        setLightbox(prev => ({
+          ...prev,
+          index: (prev.index - 1 + prev.images.length) % prev.images.length
+        }));
+      } else if (e.key === "ArrowRight") {
+        setLightbox(prev => ({
+          ...prev,
+          index: (prev.index + 1) % prev.images.length
+        }));
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lightbox.isOpen]);
 
   useEffect(() => {
     if (!isStandalone) return;
@@ -273,6 +389,7 @@ export default function AdminDashboard({
           map.set(r.id, {
             ...old,
             id: r.id,
+            routerId: r.routerId || old.routerId,
             username: r.username || old.username,
             isOnline: !!r.isOnline,
             profile: r.profile || old.profile || '-',
@@ -281,6 +398,14 @@ export default function AdminDashboard({
             uptime: r.isOnline ? (r.uptime || null) : null,
             lastSeen: r.lastSeen || old.lastSeen,
             lastDisconnect: r.lastDisconnect || old.lastDisconnect,
+            latitude: r.latitude !== undefined ? r.latitude : old.latitude,
+            longitude: r.longitude !== undefined ? r.longitude : old.longitude,
+            topologyNodeId: r.topologyNodeId !== undefined ? r.topologyNodeId : old.topologyNodeId,
+            roadCoordinates: r.roadCoordinates !== undefined ? r.roadCoordinates : old.roadCoordinates,
+            whatsapp: r.whatsapp !== undefined ? r.whatsapp : old.whatsapp,
+            photoUrl: r.photoUrl !== undefined ? r.photoUrl : old.photoUrl,
+            photoUrl2: r.photoUrl2 !== undefined ? r.photoUrl2 : old.photoUrl2,
+            photoUrl3: r.photoUrl3 !== undefined ? r.photoUrl3 : old.photoUrl3,
           });
         }
         return Array.from(map.values());
@@ -295,7 +420,7 @@ export default function AdminDashboard({
           type: log.type,
           time: new Date(log.createdAt)
         };
-        const updated = [newLog, ...prev].slice(0, 50);
+        const updated = [newLog, ...prev].slice(0, 100);
         
         // Update session storage so logs survive navigation
         try {
@@ -528,11 +653,15 @@ export default function AdminDashboard({
 
   const handleMarkerClick = useCallback((entity, type) => {
     if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
-      const targetLatLng = L.latLng(Number(entity.latitude), Number(entity.longitude));
+      // Menambahkan offset latitude sekitar +0.0006 derajat agar popup detail (keterangan) 
+      // berada tepat di tengah layar, bukan pin ikonnya yang tertutup di bawah.
+      const offsetLat = Number(entity.latitude) + 0.0006;
+      const targetLatLng = L.latLng(offsetLat, Number(entity.longitude));
+      const actualLatLng = L.latLng(Number(entity.latitude), Number(entity.longitude));
       mapInstance.stop();
       
       const currentZoom = mapInstance.getZoom();
-      const dist = mapInstance.getCenter().distanceTo(targetLatLng);
+      const dist = mapInstance.getCenter().distanceTo(actualLatLng);
       
       if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
         mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
@@ -543,6 +672,37 @@ export default function AdminDashboard({
     if (type === 'oltPort' && onOltPortClick) onOltPortClick(entity.id);
     else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
    }, [onNodeClick, onOltPortClick, mapInstance]);
+
+  const handleGroupMarkerClick = useCallback((centerEntity) => {
+    setActiveGroupDetailNode(null);
+    if (mapInstance && centerEntity.latitude && centerEntity.longitude && isValidCoord(centerEntity.latitude, centerEntity.longitude)) {
+      const offsetLat = Number(centerEntity.latitude) + 0.0006;
+      const targetLatLng = L.latLng(offsetLat, Number(centerEntity.longitude));
+      const actualLatLng = L.latLng(Number(centerEntity.latitude), Number(centerEntity.longitude));
+      mapInstance.stop();
+      
+      const currentZoom = mapInstance.getZoom();
+      const dist = mapInstance.getCenter().distanceTo(actualLatLng);
+      
+      if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
+        mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+      } else {
+        mapInstance.flyTo(targetLatLng, 18, { animate: true, duration: 1.2 });
+      }
+    }
+  }, [mapInstance]);
+
+  const handleGroupNodeDetailClick = useCallback((entity) => {
+    setActiveGroupDetailNode(entity);
+    if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
+      // Hanya gunakan offset vertical +0.0006 derajat agar popup dua kolom berada di posisi tengah layar yang nyaman.
+      const offsetLat = Number(entity.latitude) + 0.0006;
+      const targetLatLng = L.latLng(offsetLat, Number(entity.longitude));
+      mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+    }
+  }, [mapInstance]);
+
+
 
   const handleSearchSelect = (entity) => {
     setSearchTerm("");
@@ -560,6 +720,128 @@ export default function AdminDashboard({
     }
   };
 
+
+  const renderGroupedEntityPopup = (group) => {
+    const entity = activeGroupDetailNode;
+    const conf = entity ? (MARKER_CONFIG[entity.type] || MARKER_CONFIG.client) : null;
+
+    return (
+      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`}>
+          <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
+              {/* Left Column: Stacked List */}
+              <div className="border-right-custom" style={{ width: '230px', flexShrink: 0, paddingRight: '12px' }}>
+                  <div className="popup-header d-flex align-items-center gap-2 mb-2">
+                      <div className="rounded-circle d-flex align-items-center justify-content-center text-white bg-primary" style={{ width: '24px', height: '24px', flexShrink: 0 }}>
+                          <i className="bi bi-diagram-3" style={{ fontSize: '11px' }}></i>
+                      </div>
+                      <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '12px', maxWidth: '160px' }}>{group.length} Perangkat Bertumpuk</h6>
+                  </div>
+                  <div className="popup-body mt-2 custom-scrollbar" style={{ fontSize: '11px', maxHeight: '200px', overflowY: 'auto' }}>
+                      {group.map((item, i) => {
+                          const isSelected = activeGroupDetailNode?.id === item.id;
+                          return (
+                              <div key={i} className={`py-1 px-2 mb-1 rounded d-flex justify-content-between align-items-center ${isSelected ? 'bg-primary-subtle text-primary-emphasis fw-semibold' : ''}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
+                                  <div className="text-truncate" style={{ maxWidth: '120px' }}>
+                                      <span className="d-block text-truncate" style={{ fontSize: '11px' }}>{item.name}</span>
+                                  </div>
+                                  <button 
+                                      className={`btn btn-sm ${isSelected ? 'btn-primary text-white' : 'btn-outline-primary'}`} 
+                                      style={{ fontSize: '9px', padding: '2px 6px' }} 
+                                      onClick={() => handleGroupNodeDetailClick(item)}
+                                  >
+                                      Detail
+                                  </button>
+                              </div>
+                          );
+                      })}
+                  </div>
+              </div>
+
+              {/* Right Column: Node Details or Beautiful Placeholder */}
+              <div className="d-flex flex-column" style={{ flexGrow: 1, minWidth: '280px' }}>
+                  {entity ? (
+                      <>
+                          <div className="popup-header d-flex align-items-center gap-2 mb-2 pb-2 border-bottom">
+                              <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: conf.color || '#000', flexShrink: 0 }}>
+                                  <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
+                              </div>
+                              <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.name}</h6>
+                          </div>
+                          <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                              <div className="mb-2">
+                                  <span className="text-muted d-block" style={{ fontSize: '10px' }}>Tipe</span>
+                                  <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span>
+                              </div>
+                              {entity.description && (
+                                  <div className="mb-2">
+                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Details</span>
+                                      <span className="text-body">{entity.description}</span>
+                                  </div>
+                              )}
+                              <div className="mb-2">
+                                  <span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span>
+                                  <span className={`badge ${hasAnyUser(entity.id) && !hasOnlineUser(entity.id) ? 'bg-danger text-white' : 'bg-success text-white'}`}>
+                                      {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) ? 'Offline' : 'Online / Aktif'}
+                                  </span>
+                              </div>
+
+                              {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
+                                  <div className="mt-2 p-2 bg-light rounded border mb-2">
+                                      <span className="d-block mb-1 text-muted fw-bold" style={{ fontSize: '10px' }}><i className="bi-image"></i> Preview Foto Lapangan:</span>
+                                      <div className="d-flex gap-2 overflow-auto pb-1">
+                                          {(() => {
+                                              const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                              return photos.map((url, index) => (
+                                                  <div 
+                                                      key={index} 
+                                                      className="flex-shrink-0"
+                                                      style={{ cursor: 'pointer' }}
+                                                      onClick={() => setLightbox({ isOpen: true, index, images: photos })}
+                                                      title="Klik untuk memperbesar"
+                                                  >
+                                                      <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '65px', width: 'auto', objectFit: 'cover' }} />
+                                                  </div>
+                                              ));
+                                          })()}
+                                      </div>
+                                  </div>
+                              )}
+
+                              <div className="d-flex gap-2 mt-2">
+                                  <button className="btn btn-sm btn-outline-primary flex-grow-1" style={{ fontSize: '10px' }} onClick={() => {
+                                      setEditEntity(entity);
+                                      setEditForm({
+                                          whatsapp: entity.whatsapp || "",
+                                          address: entity.address || "",
+                                          photoUrl: entity.photoUrl || "",
+                                          photoUrl2: entity.photoUrl2 || "",
+                                          photoUrl3: entity.photoUrl3 || "",
+                                          file: null,
+                                          file2: null,
+                                          file3: null
+                                      });
+                                  }}>
+                                      <i className="bi bi-pencil-square me-1"></i> Edit Info
+                                  </button>
+                                  {entity.latitude && (
+                                      <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '10px' }}>
+                                          <i className="bi bi-geo-alt"></i> Maps
+                                      </a>
+                                  )}
+                              </div>
+                          </div>
+                      </>
+                  ) : (
+                      <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted p-3 text-center" style={{ flexGrow: 1, border: '1px dashed rgba(0,0,0,0.1)', borderRadius: '8px', minHeight: '200px' }}>
+                          <i className="bi bi-info-circle mb-2 text-primary" style={{ fontSize: '24px' }}></i>
+                          <span style={{ fontSize: '11px', lineHeight: '1.4' }}>Pilih salah satu perangkat di sebelah kiri untuk melihat detail informasi lapangan.</span>
+                      </div>
+                  )}
+              </div>
+          </div>
+      </Popup>
+    );
+  };
 
   const renderEntityPopup = (entity, type) => {
     const tKey = type === 'node' ? entity.type : type;
@@ -591,6 +873,54 @@ export default function AdminDashboard({
                         <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Type</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
                         {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Details</span><span>{entity.description}</span></div>}
                         {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) && <div className="mb-2"><span className="badge bg-danger">Offline</span></div>}
+
+                    </>
+                )}
+                {(type === 'node' || type === 'client') && (
+                    <>
+                        {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
+                            <div className="mt-3 p-2 bg-light rounded border">
+                                <strong className="d-block mb-1 border-bottom pb-1" style={{ fontSize: '11px' }}>Informasi Lapangan</strong>
+                                {entity.whatsapp && <div className="mb-2"><i className="bi bi-whatsapp me-1 text-success"></i> <a href={`https://wa.me/${entity.whatsapp}`} target="_blank" rel="noreferrer" className="text-decoration-none text-success fw-bold">{entity.whatsapp}</a></div>}
+                                {entity.address && <div className="mb-2" style={{ fontSize: '11px' }}><i className="bi bi-geo-alt me-1 text-danger"></i> <span className="text-muted">{entity.address}</span></div>}
+                                {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
+                                    <div className="mt-2">
+                                        <span className="d-block mb-1 text-muted" style={{ fontSize: '10px' }}><i className="bi bi-image me-1"></i> Preview Foto Lokasi (Klik untuk perbesar):</span>
+                                        <div className="d-flex gap-2 overflow-auto pb-1" style={{ maxWidth: '100%' }}>
+                                            {(() => {
+                                                const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                                return photos.map((url, index) => (
+                                                    <div 
+                                                        key={index} 
+                                                        className="flex-shrink-0"
+                                                        style={{ cursor: 'pointer' }}
+                                                        onClick={() => setLightbox({ isOpen: true, index, images: photos })}
+                                                        title="Klik untuk memperbesar"
+                                                    >
+                                                        <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '90px', width: 'auto', objectFit: 'cover', transition: 'transform 0.2s' }} />
+                                                    </div>
+                                                ));
+                                            })()}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        <button className="btn btn-sm w-100 mt-2 btn-outline-primary" style={{ fontSize: '12px' }} onClick={() => {
+                            setEditEntity(entity);
+                            setEditForm({
+                                whatsapp: entity.whatsapp || "",
+                                address: entity.address || "",
+                                photoUrl: entity.photoUrl || "",
+                                photoUrl2: entity.photoUrl2 || "",
+                                photoUrl3: entity.photoUrl3 || "",
+                                file: null,
+                                file2: null,
+                                file3: null
+                            });
+                        }}>
+                            <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
+                        </button>
                     </>
                 )}
                 {entity.latitude && (
@@ -625,18 +955,73 @@ export default function AdminDashboard({
         );
         });
 
-        filteredNodes.forEach(node => {
-        if (!isValidCoord(node.latitude, node.longitude)) return;
-        const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
-        const anyUser = hasAnyUser(node.id);
-        const isFaulty = anyUser && !hasOnlineUser(node.id);
-        const markerColor = isFaulty ? '#ef4444' : config.color;
 
-        markers.push(
-            <Marker key={`node-${node.id}`} position={[Number(node.latitude), Number(node.longitude)]} icon={createCustomIcon(markerColor, config.icon, isFaulty)} eventHandlers={{ click: () => handleMarkerClick(node, 'node') }}>
-                {renderEntityPopup(node, 'node')}
-            </Marker>
-        );
+
+
+
+        // GROUPING OVERLAPPING NODES (Cluster Simulation) - Highly Optimized O(N) Grid Bucketing
+        const groupMap = new Map();
+        const THRESHOLD = 0.0001; // Grouping distance threshold
+
+        filteredNodes.forEach(node => {
+            if (!isValidCoord(node.latitude, node.longitude)) return;
+            
+            // Create a grid key based on threshold for O(1) lookup bucketing
+            const latKey = Math.round(node.latitude / THRESHOLD);
+            const lngKey = Math.round(node.longitude / THRESHOLD);
+            const key = `${latKey}_${lngKey}`;
+            
+            if (!groupMap.has(key)) {
+                groupMap.set(key, []);
+            }
+            groupMap.get(key).push(node);
+        });
+
+        const groups = Array.from(groupMap.values());
+
+        groups.forEach((group, index) => {
+            if (group.length === 1) {
+                const node = group[0];
+                const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
+                const anyUser = hasAnyUser(node.id);
+                const isFaulty = anyUser && !hasOnlineUser(node.id);
+                const markerColor = isFaulty ? '#ef4444' : config.color;
+
+                markers.push(
+                    <Marker 
+                        key={`node-${node.id}`} 
+                        position={[Number(node.latitude), Number(node.longitude)]} 
+                        icon={createCustomIcon(markerColor, config.icon, isFaulty)} 
+                        draggable={false}
+                        eventHandlers={{ 
+                            click: () => handleMarkerClick(node, 'node')
+                        }}
+                    >
+                        {renderEntityPopup(node, 'node')}
+                    </Marker>
+                );
+            } else {
+                // Tampilkan badge marker tumpuk (Hanya ambil koordinat dari item pertama, tidak bisa di-drag sekaligus)
+                const center = group[0];
+                const anyFaulty = group.some(n => hasAnyUser(n.id) && !hasOnlineUser(n.id));
+                const iconHtml = `
+                    <div style="background-color: ${anyFaulty ? '#ef4444' : '#0ea5e9'}; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-weight: bold; font-size: 11px;">
+                        ${group.length}
+                    </div>
+                `;
+                const groupIcon = L.divIcon({ html: iconHtml, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
+                
+                markers.push(
+                    <Marker 
+                        key={`group-${index}`} 
+                        position={[Number(center.latitude), Number(center.longitude)]} 
+                        icon={groupIcon}
+                        eventHandlers={{ click: () => handleGroupMarkerClick(center) }}
+                    >
+                        {renderGroupedEntityPopup(group)}
+                    </Marker>
+                );
+            }
         });
     }
 
@@ -671,6 +1056,243 @@ export default function AdminDashboard({
       return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [isFullScreen, mapInstance]);
+
+  const handleEditSubmit = async (e) => {
+      e.preventDefault();
+      if (!editEntity) return;
+      setIsUploading(true);
+      try {
+          let photoUrl = editForm.photoUrl;
+          let photoUrl2 = editForm.photoUrl2;
+          let photoUrl3 = editForm.photoUrl3;
+
+          const uploadPhotoSlot = async (file) => {
+              const formData = new FormData();
+              formData.append('entityName', editEntity.name || editEntity.username || 'device');
+              formData.append('photo', file);
+              const uploadRes = await api.post('/topology/photo', formData, {
+                  headers: { 'Content-Type': 'multipart/form-data' }
+              });
+              return uploadRes.data.data.photoUrl;
+          };
+
+          if (editForm.file) {
+              photoUrl = await uploadPhotoSlot(editForm.file);
+          }
+          if (editForm.file2) {
+              photoUrl2 = await uploadPhotoSlot(editForm.file2);
+          }
+          if (editForm.file3) {
+              photoUrl3 = await uploadPhotoSlot(editForm.file3);
+          }
+          
+          const payload = {
+              whatsapp: editForm.whatsapp,
+              photoUrl: photoUrl,
+              photoUrl2: photoUrl2,
+              photoUrl3: photoUrl3
+          };
+
+          if (editEntity.type === 'ODC') {
+              await api.put(`/topology/odc/${editEntity.id}`, payload);
+          } else if (editEntity.type === 'ODP') {
+              const realId = editEntity.id - 100000;
+              await api.put(`/topology/odp/${realId}`, payload);
+          } else if (editEntity.username) {
+              // Update PppoeUser
+              await api.put(`/pppoe/${editEntity.routerId}/user/${editEntity.username}`, payload);
+          }
+
+          addLogEvent(`Info lapangan ${editEntity.name || editEntity.username} berhasil diperbarui`, 'success');
+          setEditEntity(null);
+          
+          // Reload data
+          api.get("/topology").then(res => {
+              const loadedNodes = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+              setApiNodes(loadedNodes);
+          });
+
+          if (editEntity.username && apiSelectedRouter) {
+              api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
+                  const loadedUsers = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+                  setApiUsers(loadedUsers);
+                  try {
+                      sessionStorage.removeItem(`dashboard_cache_router_${apiSelectedRouter}`);
+                  } catch(e) {}
+              });
+          }
+      } catch (err) {
+          if (err.response && err.response.status === 400) {
+              showAlert(`Gagal menyimpan: ${err.response.data.message}\n\nPeriksa file .env Anda pastikan CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, dan CLOUDINARY_API_SECRET terisi dengan benar.`, "Gagal Mengunggah Foto", "danger");
+          }
+          addLogEvent(`Gagal update: ${err.message}`, 'danger');
+      } finally {
+          setIsUploading(false);
+      }
+  };
+
+  const handleCableClick = useCallback((line) => {
+    if (editingCable) {
+      showAlert("Anda sedang mengedit rute kabel lain. Simpan atau batalkan terlebih dahulu.", "Peringatan", "warning");
+      return;
+    }
+    setSelectedCable(line);
+  }, [editingCable, showAlert]);
+
+  const handleMapClickForCable = useCallback((e) => {
+    if (!editingCable) return;
+    const { lat, lng } = e.latlng;
+    
+    // Hitung posisi penyisipan paling presisi agar rute tidak menyilang secara acak
+    const insertIdx = findInsertionIndex(e.latlng, cableVertices);
+    
+    // Simpan history sebelum perubahan
+    setCableHistory(prev => [...prev, cableVertices]);
+
+    const updated = [...cableVertices];
+    updated.splice(insertIdx, 0, [lat, lng]);
+    setCableVertices(updated);
+  }, [editingCable, cableVertices]);
+
+  const handleUndoLastVertex = useCallback(() => {
+    if (cableHistory.length === 0) return;
+    const prev = cableHistory[cableHistory.length - 1];
+    setCableVertices(prev);
+    setCableHistory(h => h.slice(0, -1));
+  }, [cableHistory]);
+
+  const handleClearAllVertices = useCallback(() => {
+    if (!editingCable) return;
+    
+    // Simpan history sebelum perubahan
+    setCableHistory(prev => [...prev, cableVertices]);
+
+    const start = editingCable.coordinates[0];
+    const end = editingCable.coordinates[editingCable.coordinates.length - 1];
+    setCableVertices([start, end]);
+  }, [editingCable, cableVertices]);
+
+  const handleSaveCableRoute = async () => {
+    if (!editingCable) return;
+    try {
+      const payload = {
+        roadCoordinates: JSON.stringify(cableVertices)
+      };
+
+      const cable = editingCable;
+
+      if (cable.type === 'router-to-olt') {
+        const portId = cable.id.replace('router-olt-', '');
+        await api.put(`/olt-ports/${portId}`, payload);
+      } else if (cable.type === 'olt-to-odc') {
+        const nodeId = cable.id.replace('olt-', '');
+        await api.put(`/topology/odc/${nodeId}`, payload);
+      } else if (cable.type === 'odc-to-odp' || cable.type === 'node-to-node') {
+        const nodeId = cable.id.replace('node-', '');
+        const node = filteredNodes.find(n => n.id === Number(nodeId));
+        if (node) {
+          if (node.type === 'ODC') {
+            await api.put(`/topology/odc/${nodeId}`, payload);
+          } else {
+            await api.put(`/topology/odp/${nodeId}`, payload);
+          }
+        }
+      } else if (cable.type === 'odp-to-client') {
+        const clientId = cable.id.replace('client-', '');
+        const client = filteredUsers.find(u => u.id === Number(clientId));
+        if (client) {
+          await api.put(`/pppoe/${client.routerId}/user/${client.username}`, payload);
+        }
+      }
+
+      addLogEvent(`Berhasil menyimpan rute kustom ${cable.label}`, 'success');
+      setSelectedCable(null);
+      setEditingCable(null);
+      setCableVertices([]);
+      setCableHistory([]);
+      
+      // Refresh map data
+      api.get("/topology").then(res => {
+        setApiNodes(res.data?.data || res.data || []);
+      });
+      if (apiSelectedRouter) {
+        api.get(`/olt-ports/router/${apiSelectedRouter}`).then(res => {
+          setApiOltPorts(res.data?.data || res.data || []);
+        });
+        api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
+          setApiUsers(res.data?.data || res.data || []);
+        });
+      }
+    } catch (error) {
+      console.error("Gagal menyimpan rute kabel:", error);
+      showAlert(error.response?.data?.message || "Gagal menyimpan rute kabel", "Gagal", "danger");
+      addLogEvent(`Gagal menyimpan rute kabel: ${error.message}`, 'danger');
+    }
+  };
+
+  const handleResetCableRoute = async () => {
+    const cable = editingCable || selectedCable;
+    if (!cable) return;
+    
+    showConfirm(
+      `Apakah Anda yakin ingin mereset rute "${cable.label}" kembali ke otomatis (mengikuti jalan)?`,
+      async () => {
+        try {
+          const payload = {
+            roadCoordinates: null
+          };
+
+          if (cable.type === 'router-to-olt') {
+            const portId = cable.id.replace('router-olt-', '');
+            await api.put(`/olt-ports/${portId}`, payload);
+          } else if (cable.type === 'olt-to-odc') {
+            const nodeId = cable.id.replace('olt-', '');
+            await api.put(`/topology/odc/${nodeId}`, payload);
+          } else if (cable.type === 'odc-to-odp' || cable.type === 'node-to-node') {
+            const nodeId = cable.id.replace('node-', '');
+            const node = filteredNodes.find(n => n.id === Number(nodeId));
+            if (node) {
+              if (node.type === 'ODC') {
+                await api.put(`/topology/odc/${nodeId}`, payload);
+              } else {
+                await api.put(`/topology/odp/${nodeId}`, payload);
+              }
+            }
+          } else if (cable.type === 'odp-to-client') {
+            const clientId = cable.id.replace('client-', '');
+            const client = filteredUsers.find(u => u.id === Number(clientId));
+            if (client) {
+              await api.put(`/pppoe/${client.routerId}/user/${client.username}`, payload);
+            }
+          }
+
+          addLogEvent(`Rute ${cable.label} di-reset ke otomatis`, 'success');
+          setSelectedCable(null);
+          setEditingCable(null);
+          setCableVertices([]);
+          setCableHistory([]);
+          
+          // Refresh map data
+          api.get("/topology").then(res => {
+            setApiNodes(res.data?.data || res.data || []);
+          });
+          if (apiSelectedRouter) {
+            api.get(`/olt-ports/router/${apiSelectedRouter}`).then(res => {
+              setApiOltPorts(res.data?.data || res.data || []);
+            });
+            api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
+              setApiUsers(res.data?.data || res.data || []);
+            });
+          }
+        } catch (error) {
+          console.error("Gagal mereset rute kabel:", error);
+          showAlert(error.response?.data?.message || "Gagal mereset rute kabel", "Gagal", "danger");
+          addLogEvent(`Gagal mereset rute kabel: ${error.message}`, 'danger');
+        }
+      },
+      "Konfirmasi Reset Rute"
+    );
+  };
 
   return (
     <div className="container-fluid p-3 bg-body-secondary d-flex flex-column" style={{ height: '100vh', overflow: 'hidden', transition: 'background-color 0.3s' }}>
@@ -810,27 +1432,29 @@ export default function AdminDashboard({
                 center={mapCenter} 
                 zoom={8} 
                 scrollWheelZoom={true} 
-                style={{ height: '100%', width: '100%' }}
+                style={{ height: '100%', width: '100%', outline: 'none' }}
                 zoomControl={false}
                 ref={setMapInstance}
                 preferCanvas={true}
+                keyboard={false}
             >
                 {mapType === 'vector' ? (
                     <>
-                        <TileLayer
-                            key="light-tile"
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                            maxZoom={20}
-                            opacity={isDarkMode ? 0 : 1}
-                        />
-                        <TileLayer
-                            key="dark-tile"
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                            maxZoom={20}
-                            opacity={isDarkMode ? 1 : 0}
-                        />
+                        {isDarkMode ? (
+                            <TileLayer
+                                key="dark-tile"
+                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                                maxZoom={20}
+                            />
+                        ) : (
+                            <TileLayer
+                                key="light-tile"
+                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                                maxZoom={20}
+                            />
+                        )}
                     </>
                 ) : (
                     <TileLayer
@@ -849,10 +1473,59 @@ export default function AdminDashboard({
                       weight={line.weight}
                       dashArray={line.dashArray}
                       label={line.label}
+                      onClick={() => handleCableClick(line)}
                   />
                 ))}
                 
                 {renderMarkers()}
+
+                {editingCable && (
+                  <Polyline
+                    positions={cableVertices}
+                    pathOptions={{ color: '#ffb300', weight: 6, opacity: 0.9, dashArray: '5,10' }}
+                  />
+                )}
+
+                {editingCable && cableVertices.map((vertex, idx) => {
+                  if (idx === 0 || idx === cableVertices.length - 1) return null;
+                  return (
+                    <Marker
+                      key={`vertex-${idx}`}
+                      position={vertex}
+                      draggable={true}
+                      icon={L.divIcon({
+                        className: 'custom-vertex-icon',
+                        html: `<div class="vertex-handle-inner">${idx}</div>`,
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                      })}
+                      eventHandlers={{
+                        dragend: (e) => {
+                          const newLatLng = e.target.getLatLng();
+                          setCableHistory(prev => [...prev, cableVertices]);
+                          const updated = [...cableVertices];
+                          updated[idx] = [newLatLng.lat, newLatLng.lng];
+                          setCableVertices(updated);
+                        },
+                        click: () => {
+                          showConfirm(
+                            "Apakah Anda yakin ingin menghapus titik belokan ini?",
+                            () => {
+                              setCableHistory(prev => [...prev, cableVertices]);
+                              const updated = [...cableVertices];
+                              updated.splice(idx, 1);
+                              setCableVertices(updated);
+                            },
+                            "Hapus Titik Belokan"
+                          );
+                        }
+                      }}
+                    />
+                  );
+                })}
+
+                {editingCable && <MapClickHandler onClick={handleMapClickForCable} />}
+
                 <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
             </MapContainer>
 
@@ -902,6 +1575,62 @@ export default function AdminDashboard({
                 </button>
             </div>
 
+            {/* PANEL EDIT RUTE KABEL */}
+            {(selectedCable || editingCable) && (
+              <div className="cable-edit-panel" style={{ pointerEvents: 'auto' }}>
+                <div className="cable-edit-header">
+                  <h3 className="text-body-emphasis">{editingCable ? "Mode Edit Rute Kabel" : "Detail Koneksi Kabel"}</h3>
+                  <button className="close-btn" onClick={() => {
+                    setSelectedCable(null);
+                    setEditingCable(null);
+                    setCableVertices([]);
+                  }}>×</button>
+                </div>
+                <div className="cable-edit-body">
+                  <p className="cable-label text-body-emphasis"><strong>Kabel:</strong> {editingCable ? editingCable.label : selectedCable.label}</p>
+                  {editingCable ? (
+                    <>
+                      <p className="instruction-text">
+                        <strong>Panduan Edit Rute Pintar:</strong>
+                        <br />- <strong>Tambah:</strong> Klik di mana saja pada peta/jalan untuk menyisipkan titik belokan baru secara otomatis di posisi yang paling presisi.
+                        <br />- <strong>Geser:</strong> Tarik lingkaran merah bernomor untuk menyesuaikan kelokan jalan secara presisi.
+                        <br />- <strong>Hapus:</strong> Klik lingkaran merah bernomor untuk menghapusnya.
+                      </p>
+                      <div className="cable-action-buttons d-flex flex-wrap gap-2 mb-2">
+                        <button className="btn-save btn btn-sm btn-success text-white flex-grow-1 font-semibold" onClick={handleSaveCableRoute}>
+                          <i className="bi bi-save me-1"></i> Simpan
+                        </button>
+                        <button className="btn-reset btn btn-sm btn-warning text-white flex-grow-1 font-semibold" onClick={handleResetCableRoute}>
+                          <i className="bi bi-arrow-counterclockwise me-1"></i> Reset Otomatis
+                        </button>
+                        <button className="btn-cancel btn btn-sm btn-secondary text-white" onClick={() => {
+                          setEditingCable(null);
+                          setCableVertices([]);
+                        }}>Batal</button>
+                      </div>
+                      <div className="cable-helper-buttons d-flex gap-2">
+                        <button className="btn btn-sm btn-outline-info flex-grow-1" style={{ fontSize: '10px' }} onClick={handleUndoLastVertex} disabled={cableVertices.length <= 2}>
+                          <i className="bi bi-arrow-left me-1"></i> Undo Titik Terakhir
+                        </button>
+                        <button className="btn btn-sm btn-outline-danger flex-grow-1" style={{ fontSize: '10px' }} onClick={handleClearAllVertices} disabled={cableVertices.length <= 2}>
+                          <i className="bi bi-trash me-1"></i> Bersihkan Semua
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="cable-action-buttons">
+                      <button className="btn-edit btn btn-sm btn-primary text-white" onClick={() => {
+                        setEditingCable(selectedCable);
+                        setCableVertices([...selectedCable.coordinates]);
+                      }}>Mulai Edit Rute</button>
+                      <button className="btn-reset btn btn-sm btn-warning text-white" onClick={handleResetCableRoute}>Reset ke Otomatis</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+
 
           </div>
         </div>
@@ -912,6 +1641,267 @@ export default function AdminDashboard({
           <DashboardSystemLogs eventLogs={eventLogs} />
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {editEntity && (
+        <>
+            <div className="modal-backdrop fade show"></div>
+            <div className="modal fade show d-block" tabIndex="-1">
+                <div className="modal-dialog modal-dialog-centered">
+                    <div className="modal-content border-0 shadow-lg rounded-4">
+                        <form onSubmit={handleEditSubmit}>
+                            <div className="modal-header border-bottom-0 pt-4 px-4">
+                                <h5 className="modal-title fw-bold">Update Info {editEntity.name || editEntity.username}</h5>
+                                <button type="button" className="btn-close" onClick={() => setEditEntity(null)}></button>
+                            </div>
+                            <div className="modal-body p-4">
+                                {editEntity.username && (
+                                <div className="mb-3">
+                                    <label className="form-label text-muted small fw-bold">No. WhatsApp</label>
+                                    <div className="input-group">
+                                        <span className="input-group-text bg-light text-muted border-end-0">+62</span>
+                                        <input 
+                                            className="form-control border-start-0 ps-0" 
+                                            placeholder="8123456789" 
+                                            value={editForm.whatsapp ? editForm.whatsapp.replace(/^\+?62/, '').replace(/^0/, '') : ''} 
+                                            onChange={e => {
+                                                const val = e.target.value.replace(/\D/g, '');
+                                                setEditForm({...editForm, whatsapp: val ? `+62${val}` : ''});
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                                )}
+
+                                <div className="mb-3">
+                                    <label className="form-label text-muted small fw-bold">Foto Lokasi (Maksimal 3)</label>
+                                    <div className="row g-2">
+                                        {[
+                                            { id: 1, label: 'Foto 1', url: editForm.photoUrl, file: editForm.file, setUrl: v => setEditForm(prev => ({...prev, photoUrl: v, file: null})), setFile: (file, url) => setEditForm(prev => ({...prev, file, photoUrl: url})) },
+                                            { id: 2, label: 'Foto 2', url: editForm.photoUrl2, file: editForm.file2, setUrl: v => setEditForm(prev => ({...prev, photoUrl2: v, file2: null})), setFile: (file, url) => setEditForm(prev => ({...prev, file2: file, photoUrl2: url})) },
+                                            { id: 3, label: 'Foto 3', url: editForm.photoUrl3, file: editForm.file3, setUrl: v => setEditForm(prev => ({...prev, photoUrl3: v, file3: null})), setFile: (file, url) => setEditForm(prev => ({...prev, file3: file, photoUrl3: url})) },
+                                        ].map(slot => (
+                                            <div key={slot.id} className="col-12 col-md-4">
+                                                <div className="p-2 border rounded bg-light text-center h-100 d-flex flex-column justify-content-between">
+                                                    <span className="d-block mb-2 small fw-bold text-muted">{slot.label}</span>
+                                                    {slot.url ? (
+                                                        <div className="position-relative d-inline-block mb-2 w-100">
+                                                            <img 
+                                                                src={slot.url} 
+                                                                alt="Preview" 
+                                                                className="img-thumbnail rounded" 
+                                                                style={{ height: '80px', width: '100%', objectFit: 'cover', cursor: 'pointer' }} 
+                                                                title="Klik untuk memperbesar"
+                                                                onClick={() => {
+                                                                    const editPhotos = [editForm.photoUrl, editForm.photoUrl2, editForm.photoUrl3].filter(Boolean);
+                                                                    const clickedIndex = editPhotos.indexOf(slot.url);
+                                                                    setLightbox({ isOpen: true, index: clickedIndex >= 0 ? clickedIndex : 0, images: editPhotos });
+                                                                }}
+                                                            />
+                                                            <button 
+                                                                type="button" 
+                                                                className="btn btn-sm btn-danger position-absolute top-0 end-0 m-1" 
+                                                                style={{ padding: '0.1rem 0.3rem', fontSize: '10px' }}
+                                                                onClick={() => slot.setUrl('')}
+                                                                title="Hapus Foto"
+                                                            >
+                                                                <i className="bi bi-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-muted mb-2 py-3" style={{fontSize: '11px'}}><i className="bi bi-image d-block fs-4 mb-1"></i> Kosong</div>
+                                                    )}
+                                                    <input 
+                                                        type="file" 
+                                                        className="form-control form-control-sm" 
+                                                        accept="image/*"
+                                                        onChange={e => {
+                                                            if (e.target.files && e.target.files[0]) {
+                                                                const url = URL.createObjectURL(e.target.files[0]);
+                                                                slot.setFile(e.target.files[0], url);
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="modal-footer border-top-0 pt-0 pb-4 px-4">
+                                <button type="button" className="btn btn-light px-4" onClick={() => setEditEntity(null)} disabled={isUploading}>Batal</button>
+                                <button type="submit" className="btn btn-primary px-4" disabled={isUploading}>
+                                    {isUploading ? 'Menyimpan...' : 'Simpan'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </>
+      )}
+
+      {/* Lightbox Modal */}
+      {lightbox.isOpen && (
+          <div 
+              style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  width: '100vw',
+                  height: '100vh',
+                  backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                  zIndex: 9999,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  userSelect: 'none'
+              }}
+              onClick={() => setLightbox(prev => ({ ...prev, isOpen: false }))}
+          >
+              {/* Close Button */}
+              <button 
+                  type="button" 
+                  className="btn btn-link text-white shadow-none" 
+                  style={{
+                      position: 'absolute',
+                      top: '20px',
+                      right: '20px',
+                      fontSize: '28px',
+                      zIndex: 10000,
+                      opacity: 0.8,
+                      transition: 'opacity 0.2s',
+                  }}
+                  onClick={() => setLightbox(prev => ({ ...prev, isOpen: false }))}
+              >
+                  <i className="bi bi-x-lg"></i>
+              </button>
+
+              {/* Prev Button (Only show if multiple images exist) */}
+              {lightbox.images.length > 1 && (
+                  <button 
+                      type="button" 
+                      className="btn btn-link text-white shadow-none" 
+                      style={{
+                          position: 'absolute',
+                          left: '20px',
+                          fontSize: '36px',
+                          zIndex: 10000,
+                          opacity: 0.8,
+                          transition: 'opacity 0.2s'
+                      }}
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          setLightbox(prev => ({
+                              ...prev,
+                              index: (prev.index - 1 + prev.images.length) % prev.images.length
+                          }));
+                      }}
+                  >
+                      <i className="bi bi-chevron-left"></i>
+                  </button>
+              )}
+
+              {/* Main Image Container */}
+              <div 
+                  style={{
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      maxWidth: '90%',
+                      maxHeight: '80%'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+              >
+                  <img 
+                      src={lightbox.images[lightbox.index]} 
+                      alt={`Foto ke-${lightbox.index + 1}`} 
+                      className="img-fluid rounded-3 shadow-lg"
+                      style={{
+                          maxHeight: '75vh',
+                          maxWidth: '100%',
+                          objectFit: 'contain',
+                          border: '3px solid rgba(255, 255, 255, 0.15)'
+                      }}
+                  />
+                  
+                  {/* Indicator / Photo Count */}
+                  <div 
+                      className="mt-3 px-3 py-1 rounded-pill text-white fw-bold"
+                      style={{
+                          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                          fontSize: '14px',
+                          backdropFilter: 'blur(4px)',
+                          WebkitBackdropFilter: 'blur(4px)'
+                      }}
+                  >
+                      {lightbox.index + 1} / {lightbox.images.length}
+                  </div>
+              </div>
+
+              {/* Next Button (Only show if multiple images exist) */}
+              {lightbox.images.length > 1 && (
+                  <button 
+                      type="button" 
+                      className="btn btn-link text-white shadow-none" 
+                      style={{
+                          position: 'absolute',
+                          right: '20px',
+                          fontSize: '36px',
+                          zIndex: 10000,
+                          opacity: 0.8,
+                          transition: 'opacity 0.2s'
+                      }}
+                      onClick={(e) => {
+                          e.stopPropagation();
+                          setLightbox(prev => ({
+                              ...prev,
+                              index: (prev.index + 1) % prev.images.length
+                          }));
+                      }}
+                  >
+                      <i className="bi bi-chevron-right"></i>
+                  </button>
+              )}
+          </div>
+      )}
+
+      {/* CUSTOM ALERT MODAL */}
+      {customAlert.show && (
+        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 9999 }}>
+          <div className="custom-modal-card p-4 rounded-4 shadow-lg bg-body text-body border" style={{ width: '400px', maxWidth: '90%', animation: 'scaleUp 0.15s ease-out' }}>
+            <div className="d-flex align-items-center gap-2 mb-3">
+              <i className={`bi ${customAlert.type === 'danger' ? 'bi-exclamation-triangle-fill text-danger' : 'bi-info-circle-fill text-primary'} fs-4`}></i>
+              <h4 className="m-0 fw-bold">{customAlert.title}</h4>
+            </div>
+            <p className="mb-4 text-secondary small" style={{ whiteSpace: 'pre-line' }}>{customAlert.message}</p>
+            <div className="d-flex justify-content-end">
+              <button className="btn btn-primary px-4 fw-semibold" onClick={() => setCustomAlert(prev => ({ ...prev, show: false }))}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM CONFIRM MODAL */}
+      {customConfirm.show && (
+        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 9999 }}>
+          <div className="custom-modal-card p-4 rounded-4 shadow-lg bg-body text-body border" style={{ width: '400px', maxWidth: '90%', animation: 'scaleUp 0.15s ease-out' }}>
+            <div className="d-flex align-items-center gap-2 mb-3">
+              <i className="bi bi-question-circle-fill text-warning fs-4"></i>
+              <h4 className="m-0 fw-bold">{customConfirm.title}</h4>
+            </div>
+            <p className="mb-4 text-secondary small">{customConfirm.message}</p>
+            <div className="d-flex justify-content-end gap-2">
+              <button className="btn btn-secondary px-3 fw-semibold" onClick={customConfirm.onCancel}>Batal</button>
+              <button className="btn btn-warning text-white px-3 fw-bold shadow-sm" onClick={customConfirm.onConfirm}>Ya, Lanjutkan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

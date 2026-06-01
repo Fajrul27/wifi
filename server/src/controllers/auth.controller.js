@@ -78,6 +78,27 @@ class AuthController {
       });
     }
   }
+  /* =========================
+     UPDATE PROFILE (ME)
+  ========================= */
+  static async updateProfile(req, res) {
+    try {
+      const { username, email, password } = req.body;
+      const user = await AuthService.updateProfile(req.user.userId, { username, email, password });
+
+      return res.json({
+        success: true,
+        message: "Profile berhasil diupdate",
+        user,
+      });
+
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+      });
+    }
+  }
 }
 
 module.exports = AuthController;
