@@ -1,7 +1,10 @@
 import axios from "axios";
 
 const api = axios.create({
- baseURL: "http://localhost:3000/api",
+  // Use environment variable if set, otherwise fallback to "/api" (which Nginx will proxy in Docker)
+  // For local development, if REACT_APP_API_URL is not set, it will try /api which might need proxy in package.json
+  // Actually, to keep local dev working, we can default to localhost if not in production
+  baseURL: process.env.NODE_ENV === 'production' ? "/api" : "http://localhost:3000/api",
    withCredentials: true,
   timeout: 15000, // 🔥 penting biar tidak hanging request
   headers: {
