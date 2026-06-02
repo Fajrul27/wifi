@@ -5,27 +5,18 @@ export const popupAnchor = [0, -14];
 
 const iconCache = {};
 
-export const createCustomIcon = (color, iconClass, isOffline = false) => {
-  const cacheKey = `${color}-${iconClass}-${isOffline}`;
+export const createCustomIcon = (color, iconClass, isOffline = false, markerType = '') => {
+  const cacheKey = `${color}-${iconClass}-${isOffline}-${markerType}`;
   if (iconCache[cacheKey]) {
     return iconCache[cacheKey];
   }
 
   const pulseHtml = isOffline ? `
-    <div style="
-      position: absolute;
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      background: rgba(239, 68, 68, 0.35);
-      border: 2px solid rgba(239, 68, 68, 0.8);
-      animation: radar-pulse 1.8s infinite ease-out;
-      z-index: 1;
-    "></div>
+    <div class="radar-ripple"></div>
   ` : '';
 
   const icon = L.divIcon({
-    className: "custom-marker",
+    className: `custom-marker ${markerType}`,
     html: `
       <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;">
         ${pulseHtml}

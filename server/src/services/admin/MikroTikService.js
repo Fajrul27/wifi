@@ -38,7 +38,7 @@ class RouterService {
   // =========================
   async findAll() {
     const routers = await prisma.router.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: { name: "asc" },
     });
 
     return routers.map(r => this.sanitize(r));

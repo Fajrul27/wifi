@@ -349,6 +349,135 @@ class TopologyController {
   }
 
   // =====================================================
+  // SEARCH TOPOLOGY (ODC, ODP, USER)
+  // =====================================================
+  async searchTopology(req, res) {
+    try {
+      const q = req.query.q ? String(req.query.q).trim() : "";
+      const routerId = req.query.routerId ? Number(req.query.routerId) : null;
+
+      if (!q) {
+        return res.json({ success: true, data: [] });
+      }
+
+      // Fetch all ODCs to resolve oltPortId recursively
+      const odcs = await prisma.odc.findMany({
+        include: {
+          oltPort: { include: { olt: true } }
+        }
+      });
+
+      // Helper function to find root oltPortId and parent path for an ODC
+      const findOdcHierarchy = (odcId) => {
+        const path = [];
+        let curr = odcs.find(o => o.id === odcId);
+        let oltPortId = null;
+        let oltId = null;
+
+        while (curr) {
+          path.unshift(curr.id);
+          if (curr.oltPortId) {
+            oltPortId = curr.oltPortId;
+            oltId = curr.oltPort?.oltId || null;
+            break;
+          }
+          if (curr.parentOdcId) {
+            curr = odcs.find(o => o.id === curr.parentOdcId);
+          } else {
+            break;
+          }
+        }
+        return { oltPortId, oltId, path };
+      };
+
+      // 1. Search ODCs
+      const matchedOdcs = odcs.filter(o => 
+        o.name.toLowerCase().includes(q.toLowerCase()) && 
+        (!routerId || (o.oltPort?.olt?.routerId === routerId || (o.parentOdcId && findOdcHierarchy(o.id).oltId === routerId)))
+      );
+
+      const odcResults = matchedOdcs.map(o => {
+        const { oltPortId, path } = findOdcHierarchy(o.id);
+        return {
+          id: `odc-${o.id}`,
+          name: o.name,
+          type: "ODC",
+          oltPortId,
+          path,
+          realId: o.id,
+          label: `ODC: ${o.name}`
+        };
+      });
+
+      // 2. Search ODPs
+      const odps = await prisma.odp.findMany({
+        where: {
+          name: { contains: q, mode: "insensitive" }
+        }
+      });
+
+      const odpResults = [];
+      for (const odp of odps) {
+        const { oltPortId, path } = findOdcHierarchy(odp.odcId);
+        let matchesRouter = true;
+        if (routerId && oltPortId) {
+          const port = await prisma.oltPort.findUnique({
+            where: { id: oltPortId },
+            include: { olt: true }
+          });
+          if (port?.olt?.routerId !== routerId) {
+            matchesRouter = false;
+          }
+        }
+        if (matchesRouter) {
+          odpResults.push({
+            id: `odp-${odp.id}`,
+            name: odp.name,
+            type: "ODP",
+            oltPortId,
+            path,
+            realId: odp.id,
+            label: `ODP: ${odp.name}`
+          });
+        }
+      }
+
+      // 3. Search PPPoE Users
+      const users = await prisma.pppoeUser.findMany({
+        where: {
+          username: { contains: q, mode: "insensitive" },
+          ...(routerId ? { routerId } : {})
+        },
+        include: {
+          odpPort: { include: { odp: true } }
+        }
+      });
+
+      const userResults = [];
+      for (const u of users) {
+        if (u.odpPort?.odp) {
+          const { oltPortId, path } = findOdcHierarchy(u.odpPort.odp.odcId);
+          userResults.push({
+            id: `user-${u.id}`,
+            name: u.username,
+            type: "USER",
+            oltPortId,
+            path,
+            realId: u.id,
+            label: `User: ${u.username} (di ODP ${u.odpPort.odp.name})`
+          });
+        }
+      }
+
+      const results = [...odcResults, ...odpResults, ...userResults].slice(0, 15);
+
+      return res.json({ success: true, data: results });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  }
+
+  // =====================================================
   // UPLOAD PHOTO
   // =====================================================
 

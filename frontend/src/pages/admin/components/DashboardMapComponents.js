@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
-import { useMap, Polyline, Popup } from 'react-leaflet';
+import { useMap, Polyline, Popup, Marker } from 'react-leaflet';
 import L from 'leaflet';
 
 // Component to auto-fit map bounds to markers
 export function FitMapBounds({ coordinates, selectedRouter }) {
   const map = useMap();
-  const prevRouterRef = useRef(undefined);
+  const prevRouterRef = useRef(selectedRouter);
   const userInteractedRef = useRef(false);
+  const isInitialMountRef = useRef(true);
   
   // Reset interaction flag when selectedRouter changes
   useEffect(() => {
@@ -38,17 +39,20 @@ export function FitMapBounds({ coordinates, selectedRouter }) {
   const coordKeyRef = useRef("");
   const hasFlownRef = useRef(false);
 
-  // Restore cached map state
+  // Restore cached map state (only on initial load to preserve refresh/back buttons)
   useEffect(() => {
-    try {
-      const cachedCenter = sessionStorage.getItem(`dashboard_map_center_${selectedRouter}`);
-      const cachedZoom = sessionStorage.getItem(`dashboard_map_zoom_${selectedRouter}`);
-      if (cachedCenter && cachedZoom && !hasFlownRef.current) {
-        hasFlownRef.current = true;
-        userInteractedRef.current = true; // prevent auto-fit
-        map.setView(JSON.parse(cachedCenter), Number(cachedZoom), { animate: false });
-      }
-    } catch(e) {}
+    if (isInitialMountRef.current) {
+      try {
+        const cachedCenter = sessionStorage.getItem(`dashboard_map_center_${selectedRouter}`);
+        const cachedZoom = sessionStorage.getItem(`dashboard_map_zoom_${selectedRouter}`);
+        if (cachedCenter && cachedZoom) {
+          hasFlownRef.current = true;
+          userInteractedRef.current = true; // prevent auto-fit on load
+          map.setView(JSON.parse(cachedCenter), Number(cachedZoom), { animate: false });
+        }
+      } catch(e) {}
+      isInitialMountRef.current = false;
+    }
   }, [map, selectedRouter]);
 
   // Save map state on move end
@@ -100,20 +104,24 @@ export function FitMapBounds({ coordinates, selectedRouter }) {
       }, delay);
       return () => clearTimeout(timer);
     }
-  }, [coordinates, map]);
-  
+  }, [coordinates, map, selectedRouter]);
+
   return null;
 }
 
 // Optimized connection lines to prevent re-rendering and lag
-export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label, onClick }) => {
+export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label, isPopupOpen, onClick, onPopupClose }) => {
   return (
     <Polyline 
       positions={coordinates}
       pathOptions={{ color, weight, opacity: 0.85, dashArray, lineCap: "round" }}
       eventHandlers={onClick ? { click: onClick } : undefined}
     >
-      <Popup autoPan={false}><strong style={{ color }}>{label}</strong></Popup>
+      {isPopupOpen && (
+        <Popup autoPan={false} eventHandlers={onPopupClose ? { remove: onPopupClose } : undefined}>
+          <strong style={{ color }}>{label}</strong>
+        </Popup>
+      )}
     </Polyline>
   );
 }, (prev, next) => {
@@ -121,7 +129,9 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
       prev.weight !== next.weight ||
       prev.dashArray !== next.dashArray ||
       prev.label !== next.label ||
-      prev.onClick !== next.onClick) {
+      prev.isPopupOpen !== next.isPopupOpen ||
+      prev.onClick !== next.onClick ||
+      prev.onPopupClose !== next.onPopupClose) {
     return false;
   }
   if (prev.coordinates.length !== next.coordinates.length) return false;
@@ -134,5 +144,21 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
       return false;
     }
   }
+  return true;
+});
+
+// Optimized marker component to prevent rendering of markers whose positions and statuses have not changed.
+export const MemoizedMarker = React.memo(({ position, icon, onClick, isOpen, renderPopup }) => {
+  return (
+    <Marker position={position} icon={icon} eventHandlers={onClick ? { click: onClick } : undefined}>
+      {renderPopup()}
+    </Marker>
+  );
+}, (prev, next) => {
+  // If the popup is open, we always re-render to display live traffic/data updates
+  if (next.isOpen) return false;
+  if (prev.icon !== next.icon) return false;
+  if (prev.isOpen !== next.isOpen) return false;
+  if (prev.position[0] !== next.position[0] || prev.position[1] !== next.position[1]) return false;
   return true;
 });

@@ -575,7 +575,7 @@ html.dark-mode .form-control.bg-transparent {
 }
 
 /* ── Leaflet Popup Theme Alignment ──────────────────────────── */
-.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+.leaflet-popup-content-wrapper, .leaflet-popup-tip, .leaflet-tooltip {
   background: var(--noc-bg-secondary, #fff) !important;
   color: var(--noc-text, #1e293b) !important;
   border: 1px solid var(--noc-border, rgba(0, 0, 0, 0.05)) !important;
@@ -583,7 +583,8 @@ html.dark-mode .form-control.bg-transparent {
 }
 
 html.dark-mode .leaflet-popup-content-wrapper, 
-html.dark-mode .leaflet-popup-tip {
+html.dark-mode .leaflet-popup-tip,
+html.dark-mode .leaflet-tooltip {
   background: #151c2c !important;
   color: #f8fafc !important;
   border-color: rgba(255, 255, 255, 0.1) !important;
@@ -592,7 +593,9 @@ html.dark-mode .leaflet-popup-tip {
 
 /* Override any default leaflet text color inheritance in dark mode */
 html.dark-mode .leaflet-popup-content,
-html.dark-mode .leaflet-popup-content * {
+html.dark-mode .leaflet-popup-content *,
+html.dark-mode .leaflet-tooltip,
+html.dark-mode .leaflet-tooltip * {
   color: #f8fafc !important;
 }
 
@@ -769,4 +772,42 @@ html:active-view-transition {
 @keyframes radar-pulse {
   0% { transform: scale(0.45); opacity: 0.9; }
   100% { transform: scale(2.2); opacity: 0; }
+}
+
+.radar-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  margin-top: -28px;
+  margin-left: -28px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.35);
+  border: 2px solid rgba(239, 68, 68, 0.8);
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+}
+
+/* Only main Routers animate continuously for high-level visibility */
+.custom-marker.router .radar-ripple {
+  opacity: 1;
+  animation: radar-pulse 1.8s infinite ease-out;
+}
+
+/* ODC/ODP nodes and Clients only animate on hover to avoid GPU overload */
+.custom-marker.node .radar-ripple,
+.custom-marker.client .radar-ripple {
+  opacity: 0;
+  animation: none;
+}
+
+.custom-marker.node:hover .radar-ripple,
+.custom-marker.client:hover .radar-ripple {
+  opacity: 1;
+  animation: radar-pulse 1.8s infinite ease-out;
 }

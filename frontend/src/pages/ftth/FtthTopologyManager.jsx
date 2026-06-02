@@ -91,7 +91,7 @@ const ConfirmDialog = ({ show, title, message, onConfirm, onCancel, confirmText 
 // ─────────────────────────────────────────────────────────────
 // OLT CARD COMPONENT
 // ─────────────────────────────────────────────────────────────
-const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onManagePort, onCreateOdc, onCreateChildOdc, onCreateOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, portLoading }) => {
+const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onManagePort, onCreateOdc, onCreateChildOdc, onCreateOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, portLoading, expandedPorts, onToggleExpandPort }) => {
   const [showPorts, setShowPorts] = useState(true);
   const router = routers.find((r) => r.id === olt.routerId);
   const portCount = olt.ports?.length || olt._count?.ports || 0;
@@ -179,6 +179,8 @@ const OltCard = ({ olt, routers, onEdit, onDelete, onAddPort, onDeletePort, onMa
                     onDelete={!port._count?.nodes ? () => onDeletePort(port.id, olt.id) : undefined}
                     onManage={onManagePort}
                     loading={isLoading}
+                    expanded={expandedPorts?.[port.id]}
+                    onToggleExpand={(val) => onToggleExpandPort?.(port.id, val)}
                   />
                 );
               })}
@@ -333,10 +335,23 @@ const OltModal = ({ show, onClose, onSubmit, initialData, routers, mode = "creat
 // ─────────────────────────────────────────────────────────────
 export default function OltManagement() {
   /* ───────────────── STATE ───────────────── */
+  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
   const [routers, setRouters] = useState([]);
   const [oltsByRouter, setOltsByRouter] = useState({});
-  const [selectedRouter, setSelectedRouter] = useState(null);
+  const [selectedRouter, setSelectedRouter] = useState(() => {
+     if (localStorage.getItem('lock_router') === 'true') {
+         const saved = localStorage.getItem('locked_router_id');
+         if (saved) return Number(saved);
+     }
+     return null;
+  });
   
+  /* ───────────────── QUICK SEARCH & JUMP STATES ───────────────── */
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [expandedPorts, setExpandedPorts] = useState({});
+
   /* ───────────────── UI STATE ───────────────── */
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState({});
@@ -401,10 +416,10 @@ export default function OltManagement() {
         if (!isMountedRef.current) return;
         setRouters(routersData);
         
-        if (routersData.length > 0) {
+        if (routersData.length > 0 && !selectedRouter) {
           const defaultRouter = routersData[0].id;
           setSelectedRouter(defaultRouter);
-          await loadRouterOlts(defaultRouter);
+          // loadRouterOlts is handled by useEffect on selectedRouter change
         }
       } catch (err) {
         console.error("Init error:", err);
@@ -414,7 +429,81 @@ export default function OltManagement() {
     };
     init();
     return () => { isMountedRef.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadRouters]);
+
+  // Debounce search topology
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const delayDebounce = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await api.get("/topology/search", {
+          params: { q: searchQuery, routerId: selectedRouter }
+        });
+        setSearchResults(res.data?.data ?? []);
+      } catch (err) {
+        console.error("Gagal melakukan pencarian:", err);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [searchQuery, selectedRouter]);
+
+  // Jump to searched element and trigger glow highlight
+  const handleJumpToItem = async (item) => {
+    if (!item.oltPortId) return;
+
+    // Expand parent OLT Port
+    setExpandedPorts(prev => ({ ...prev, [item.oltPortId]: true }));
+
+    // Reset search
+    setSearchQuery("");
+    setSearchResults([]);
+
+    // Wait for the tree dynamic loading and rendering
+    setTimeout(() => {
+      const element = document.getElementById(item.id);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.classList.add("pulse-highlight-gold");
+        setTimeout(() => {
+          element.classList.remove("pulse-highlight-gold");
+        }, 4000);
+      } else {
+        // Fallback retry if loading was slightly slower
+        setTimeout(() => {
+          const retryElement = document.getElementById(item.id);
+          if (retryElement) {
+            retryElement.scrollIntoView({ behavior: "smooth", block: "center" });
+            retryElement.classList.add("pulse-highlight-gold");
+            setTimeout(() => {
+              retryElement.classList.remove("pulse-highlight-gold");
+            }, 4000);
+          }
+        }, 800);
+      }
+    }, 500);
+  };
+
+  const handleExpandAllPorts = () => {
+    const allPorts = {};
+    const currentOlts = oltsByRouter[selectedRouter] || [];
+    currentOlts.forEach(o => {
+      (o.ports || []).forEach(p => {
+        allPorts[p.id] = true;
+      });
+    });
+    setExpandedPorts(allPorts);
+  };
+
+  const handleCollapseAllPorts = () => {
+    setExpandedPorts({});
+  };
 
   /* ───────────────── LOAD OLTs FOR SELECTED ROUTER ───────────────── */
   const loadRouterOlts = useCallback(async (routerId) => {
@@ -564,7 +653,9 @@ const handleAddPort = async (olt) => {
       message: `Apakah Anda yakin ingin menghapus ODP "${odp.name}"? Pastikan tidak ada user aktif yang terhubung ke ODP ini.`,
       onConfirm: async () => {
         try {
-          await api.delete(`/topology/odp/${odp.id}`);
+          const rawOdpId = odp.id;
+          const realId = rawOdpId >= 100000 ? rawOdpId - 100000 : rawOdpId;
+          await api.delete(`/topology/odp/${realId}`);
           if (fetchTreeCb) await fetchTreeCb();
           if (selectedRouter) await loadRouterOlts(selectedRouter);
         } catch (err) {
@@ -642,6 +733,17 @@ const handleAddPort = async (olt) => {
         .card-hover:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .spin-anim { animation: spin 0.8s linear infinite; display: inline-block; }
+        @keyframes gold-glow {
+          0% { box-shadow: 0 0 0 0px rgba(255, 193, 7, 0.8); border: 2px solid #ffc107 !important; }
+          50% { box-shadow: 0 0 0 16px rgba(255, 193, 7, 0); border: 2px solid #ffc107 !important; }
+          100% { box-shadow: 0 0 0 0px rgba(255, 193, 7, 0); }
+        }
+        .pulse-highlight-gold {
+          animation: gold-glow 1.5s infinite ease-in-out;
+          transform: scale(1.02);
+          z-index: 10;
+          position: relative;
+        }
       `}</style>
 
       <div className="container-fluid py-4" style={{ background: "#f8f9fa", minHeight: "100vh" }}>
@@ -655,6 +757,23 @@ const handleAddPort = async (olt) => {
             <p className="text-muted mb-0 small">Kelola Optical Line Terminal per Router</p>
           </div>
           <div className="d-flex align-items-center gap-2">
+            <button
+              className="btn btn-outline-info btn-sm d-flex align-items-center gap-2"
+              onClick={handleExpandAllPorts}
+              title="Buka semua port OLT"
+            >
+              <i className="bi bi-arrows-expand"></i>
+              <span className="d-none d-sm-inline">Buka Semua Port</span>
+            </button>
+            <button
+              className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-2"
+              onClick={handleCollapseAllPorts}
+              title="Tutup semua port OLT"
+            >
+              <i className="bi bi-arrows-collapse"></i>
+              <span className="d-none d-sm-inline">Tutup Semua Port</span>
+            </button>
+            <div className="vr d-none d-sm-block mx-1"></div>
             <button
               className="btn btn-primary btn-sm d-flex align-items-center gap-2"
               onClick={() => { setEditingOlt(null); setShowOltModal(true); }}
@@ -672,21 +791,107 @@ const handleAddPort = async (olt) => {
           </div>
         </div>
 
-        {/* ===== ROUTER SELECTOR & STATS ===== */}
+        {/* ===== ROUTER SELECTOR & SEARCH BAR ===== */}
         <div className="row g-3 mb-4">
           <div className="col-md-4">
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body">
                 <label className="form-label small text-muted fw-semibold mb-2">Pilih Router</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={selectedRouter || ""}
-                  onChange={(e) => setSelectedRouter(Number(e.target.value))}
-                >
-                  {routers.map((r) => (
-                    <option key={r.id} value={r.id}>{r.name} • {r.host}</option>
-                  ))}
-                </select>
+                <div className="input-group input-group-sm">
+                  <select
+                    className="form-select"
+                    value={selectedRouter || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedRouter(val ? Number(val) : null);
+                      if (isRouterLocked && val) {
+                          localStorage.setItem('locked_router_id', val);
+                      }
+                    }}
+                  >
+                    {routers.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name} • {r.host}</option>
+                    ))}
+                  </select>
+                  <button 
+                      className={`btn btn-outline-secondary ${isRouterLocked ? 'text-primary' : 'text-muted'}`}
+                      type="button"
+                      onClick={() => {
+                          const newLocked = !isRouterLocked;
+                          setIsRouterLocked(newLocked);
+                          localStorage.setItem('lock_router', newLocked);
+                          if (newLocked && selectedRouter) {
+                              localStorage.setItem('locked_router_id', selectedRouter);
+                          } else {
+                              localStorage.removeItem('locked_router_id');
+                          }
+                      }}
+                      title={isRouterLocked ? "Buka kuncian router default" : "Kunci router ini sebagai default"}
+                  >
+                      <i className={`bi ${isRouterLocked ? 'bi-lock-fill' : 'bi-unlock'}`}></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-md-8 position-relative">
+            <div className="card border-0 shadow-sm h-100">
+              <div className="card-body">
+                <label className="form-label small text-muted fw-semibold mb-2">Pencarian & Navigasi Cepat (ODC, ODP, User)</label>
+                <div className="input-group input-group-sm">
+                  <span className="input-group-text bg-white border-end-0"><i className="bi bi-search text-muted"></i></span>
+                  <input
+                    type="text"
+                    className="form-control border-start-0 ps-0"
+                    placeholder="Cari nama ODC, ODP, atau username PPPoE..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button className="btn btn-outline-secondary border-start-0" type="button" onClick={() => { setSearchQuery(""); setSearchResults([]); }}>
+                      <i className="bi bi-x-lg"></i>
+                    </button>
+                  )}
+                </div>
+
+                {/* Suggestions Overlay */}
+                {searchQuery && (searchResults.length > 0 || searching) && (
+                  <div className="position-absolute shadow-lg rounded-3 border bg-white mt-2 overflow-auto" 
+                       style={{ zIndex: 1050, maxHeight: "280px", left: "15px", right: "15px", borderTop: "none" }}>
+                    {searching ? (
+                      <div className="text-center py-3 text-muted" style={{ fontSize: "0.8rem" }}>
+                        <span className="spinner-border spinner-border-sm me-2 text-primary" role="status"></span>
+                        Mencari...
+                      </div>
+                    ) : (
+                      <div className="list-group list-group-flush">
+                        {searchResults.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="list-group-item list-group-item-action d-flex justify-content-between align-items-center text-start border-0 py-2.5 px-3"
+                            onClick={() => handleJumpToItem(item)}
+                          >
+                            <div className="pe-3">
+                              <strong className="text-dark d-block" style={{ fontSize: "0.82rem" }}>{item.name}</strong>
+                              <span className="text-muted small" style={{ fontSize: "0.7rem" }}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <span className={`badge rounded-pill text-uppercase px-2.5 py-1 ${
+                              item.type === "ODC" ? "bg-primary-subtle text-primary" :
+                              item.type === "ODP" ? "bg-info-subtle text-info" :
+                              "bg-success-subtle text-success"
+                            }`} style={{ fontSize: "0.6rem" }}>
+                              {item.type}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -750,6 +955,8 @@ const handleAddPort = async (olt) => {
                 onEditOdc={handleOpenEditOdcForm}
                 onEditOdp={handleOpenEditOdpForm}
                 portLoading={portLoading}
+                expandedPorts={expandedPorts}
+                onToggleExpandPort={(portId, val) => setExpandedPorts(prev => ({ ...prev, [portId]: val }))}
               />
             ))}
           </div>

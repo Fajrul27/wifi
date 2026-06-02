@@ -89,7 +89,9 @@ const AssignUserModal = ({ show, onClose, odp, odpPort, routerId, onSuccess }) =
     if (!selected) return;
     setSubmitting(true); setError("");
     try {
-      await api.post(`/topology/odp/${odp.id}/assign`, { userId: selected.id, odpPortId: odpPort.id });
+      const rawOdpId = odp.id;
+      const realId = rawOdpId >= 100000 ? rawOdpId - 100000 : rawOdpId;
+      await api.post(`/topology/odp/${realId}/assign`, { userId: selected.id, odpPortId: odpPort.id });
       onSuccess?.(); onClose();
     } catch (err) {
       setError(err.response?.data?.message || err.message || "Gagal assign user");
@@ -151,7 +153,7 @@ const AssignUserModal = ({ show, onClose, odp, odpPort, routerId, onSuccess }) =
 // ─────────────────────────────────────────────────────────────
 // ODP ITEM
 // ─────────────────────────────────────────────────────────────
-const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
+const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh, parentPath }) => {
   const [expanded, setExpanded] = useState(true);
   const [assignModal, setAssignModal] = useState({ show: false, port: null });
   const [unassignConfirm, setUnassignConfirm] = useState({ show: false, port: null });
@@ -200,7 +202,7 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
         onCancel={() => setUnassignConfirm({ show: false, port: null })}
       />
 
-      <div className="card border-0 shadow-sm mb-1" style={{ fontSize: "0.78rem" }}>
+      <div id={`odp-${odp.id}`} className="card border-0 shadow-sm mb-1 transition-all" style={{ fontSize: "0.78rem" }}>
         {/* ODP Header */}
         <div className="d-flex align-items-center justify-content-between px-2 py-1"
           style={{ background: "linear-gradient(90deg,#e0f7fa,#f0fdff)", borderRadius: "6px 6px 0 0", cursor: "pointer" }}
@@ -209,6 +211,12 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
             <i className={`bi bi-${expanded ? "dash-square" : "plus-square"} text-info`} />
             <i className="bi bi-boxes text-info" />
             <span className="fw-semibold text-info">{odp.name}</span>
+            {parentPath && (
+              <span className="text-muted small px-1.5 py-0.5 rounded bg-light border border-light-subtle d-inline-flex align-items-center gap-1 ms-1" style={{ fontSize: "0.62rem" }}>
+                <i className="bi bi-diagram-2 text-secondary" style={{ fontSize: "0.58rem" }} />
+                {parentPath}
+              </span>
+            )}
             <span className="badge bg-info text-white" style={{ fontSize: "0.65rem" }}>
               {SPLIT_LABEL[odp.splitRatio] ?? odp.splitRatio}
             </span>
@@ -241,6 +249,7 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
             <div className="d-flex flex-wrap gap-1">
               {(odp.ports ?? []).map(port => (
                 <button key={port.id}
+                  id={port.isUsed && port.user?.id ? `user-${port.user.id}` : `odp-port-${port.id}`}
                   className={`btn btn-sm py-1 px-2 ${port.isUsed ? "btn-success" : "btn-outline-secondary"}`}
                   style={{ fontSize: "0.68rem", lineHeight: 1.3, minWidth: "52px" }}
                   title={port.isUsed ? `${port.user?.username ?? "Terpakai"} — klik untuk lepas` : `Port #${port.index} — klik untuk assign`}
@@ -269,7 +278,7 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh }) => {
 // ─────────────────────────────────────────────────────────────
 // ODC PORT ROW — satu baris port ODC
 // ─────────────────────────────────────────────────────────────
-const OdcPortRow = ({ port, odc, level, onAddChildOdc, onAddOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, childOdcMap, routerId, onRefresh }) => {
+const OdcPortRow = ({ port, odc, level, onAddChildOdc, onAddOdp, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, childOdcMap, routerId, onRefresh, parentPath }) => {
   const isODC = port.connectionType === "ODC";
   const isODP = port.connectionType === "ODP";
   const isFree = port.connectionType === "NONE";
@@ -315,13 +324,15 @@ const OdcPortRow = ({ port, odc, level, onAddChildOdc, onAddOdp, onDeleteOdc, on
           onAddChildOdc={onAddChildOdc} onAddOdp={onAddOdp}
           onDeleteOdc={onDeleteOdc} onDeleteOdp={onDeleteOdp}
           onEditOdc={onEditOdc} onEditOdp={onEditOdp}
-          childOdcMap={childOdcMap} routerId={routerId} onRefresh={onRefresh} />
+          childOdcMap={childOdcMap} routerId={routerId} onRefresh={onRefresh}
+          parentPath={`${parentPath} • Port #${port.index}`} />
       )}
       {connectedOdp && (
         <OdpItem odp={connectedOdp} routerId={routerId}
           onDeleteOdp={onDeleteOdp}
           onEditOdp={onEditOdp}
-          onRefresh={onRefresh} />
+          onRefresh={onRefresh}
+          parentPath={`${parentPath} • Port #${port.index}`} />
       )}
     </div>
   );
@@ -330,7 +341,7 @@ const OdcPortRow = ({ port, odc, level, onAddChildOdc, onAddOdp, onDeleteOdc, on
 // ─────────────────────────────────────────────────────────────
 // ODC TREE ITEM — rekursif
 // ─────────────────────────────────────────────────────────────
-const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, routerId, onRefresh, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp }) => {
+const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, routerId, onRefresh, onDeleteOdc, onDeleteOdp, onEditOdc, onEditOdp, parentPath }) => {
   const [expanded, setExpanded] = useState(true);
   const usedPorts = odc.ports?.filter(p => p.isUsed).length ?? 0;
   const totalPorts = odc.ports?.length ?? 0;
@@ -348,7 +359,7 @@ const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, rou
     <div style={{ marginLeft: `${indent}px`, marginTop: "6px",
       borderLeft: level > 0 ? "2px dashed #adb5bd" : "none",
       paddingLeft: level > 0 ? "10px" : "0" }}>
-      <div className="card border-0 shadow-sm" style={{ fontSize: "0.8rem" }}>
+      <div id={`odc-${odc.id}`} className="card border-0 shadow-sm transition-all" style={{ fontSize: "0.8rem" }}>
         {/* ODC Header */}
         <div className="d-flex align-items-center justify-content-between px-2 py-1"
           style={{ background: "linear-gradient(90deg,#e8f0fe,#f0f4ff)", borderRadius: "6px 6px 0 0", cursor: "pointer" }}
@@ -357,6 +368,12 @@ const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, rou
             <i className={`bi bi-${expanded ? "dash-square" : "plus-square"} text-primary`} />
             <i className="bi bi-diagram-3-fill text-primary" />
             <span className="fw-bold text-primary">{odc.name}</span>
+            {parentPath && (
+              <span className="text-muted small px-1.5 py-0.5 rounded bg-light border border-light-subtle d-inline-flex align-items-center gap-1 ms-1" style={{ fontSize: "0.62rem" }}>
+                <i className="bi bi-diagram-2 text-secondary" style={{ fontSize: "0.58rem" }} />
+                {parentPath}
+              </span>
+            )}
             <span className="badge bg-primary" style={{ fontSize: "0.62rem" }}>
               {SPLIT_LABEL[odc.splitRatio] ?? odc.splitRatio}
             </span>
@@ -393,7 +410,8 @@ const OdcTreeItem = ({ odc, level = 0, onAddChildOdc, onAddOdp, childOdcMap, rou
                   onAddChildOdc={onAddChildOdc} onAddOdp={onAddOdp}
                   onDeleteOdc={onDeleteOdc} onDeleteOdp={onDeleteOdp}
                   onEditOdc={onEditOdc} onEditOdp={onEditOdp}
-                  childOdcMap={localMap} routerId={routerId} onRefresh={onRefresh} />
+                  childOdcMap={localMap} routerId={routerId} onRefresh={onRefresh}
+                  parentPath={parentPath ? `${parentPath} • ${odc.name}` : odc.name} />
               ))
             }
           </div>
@@ -417,8 +435,12 @@ export default function PortItem({
   onEditOdp,         // (odp, fetchTree) → edit ODP ← NEW
   onDelete,
   loading,
+  expanded: propExpanded,
+  onToggleExpand: propOnToggle,
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = propExpanded !== undefined ? propExpanded : localExpanded;
+  const setExpanded = propOnToggle !== undefined ? propOnToggle : setLocalExpanded;
   const [odcTree, setOdcTree] = useState([]);
   const [loadingTree, setLoadingTree] = useState(false);
 
@@ -530,6 +552,7 @@ export default function PortItem({
                 childOdcMap={childOdcMap}
                 routerId={olt?.routerId}
                 onRefresh={fetchTree}
+                parentPath={`${olt.name} • Port #${port.index}`}
               />
             ))
           )}

@@ -1,15 +1,38 @@
 import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
+import MarkerClusterGroup from 'react-leaflet-cluster';
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "leaflet/dist/leaflet.css";
 import "./AdminDashboard.css";
 import L from "leaflet";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
 import { createCustomIcon, MARKER_CONFIG, isValidCoord } from "./utils/mapUtils";
-import { FitMapBounds, MemoizedPolyline } from "./components/DashboardMapComponents";
+import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "./components/DashboardMapComponents";
 import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
 import DashboardSystemLogs from "./components/DashboardSystemLogs";
+
+// Helper to listen to map viewport changes (bounds & zoom)
+function MapViewportListener({ onBoundsChange, onZoomChange }) {
+  const map = useMap();
+  useEffect(() => {
+    const handleMapChange = () => {
+      onBoundsChange(map.getBounds().pad(0.2));
+      onZoomChange(map.getZoom());
+    };
+    handleMapChange();
+    map.on("moveend", handleMapChange);
+    map.on("zoomend", handleMapChange);
+    return () => {
+      map.off("moveend", handleMapChange);
+      map.off("zoomend", handleMapChange);
+    };
+  }, [map, onBoundsChange, onZoomChange]);
+  return null;
+}
 
 // Utility to calculate the distance from a point to a segment
 const getDistanceToSegment = (p, a, b) => {
@@ -75,6 +98,37 @@ function MapClickHandler({ onClick }) {
   return null;
 }
 
+const groupIconCache = {};
+const getGroupIcon = (count, isFaulty) => {
+  const cacheKey = `${count}-${isFaulty}`;
+  if (groupIconCache[cacheKey]) return groupIconCache[cacheKey];
+  
+  const iconHtml = `
+      <div style="background-color: ${isFaulty ? '#ef4444' : '#0ea5e9'}; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-weight: bold; font-size: 11px;">
+          ${count}
+      </div>
+  `;
+  const icon = L.divIcon({ html: iconHtml, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
+  groupIconCache[cacheKey] = icon;
+  return icon;
+};
+
+const clientGroupIconCache = {};
+const getClientGroupIcon = (count, anyOnline) => {
+  const cacheKey = `${count}-${anyOnline}`;
+  if (clientGroupIconCache[cacheKey]) return clientGroupIconCache[cacheKey];
+  
+  const markerColor = anyOnline ? '#10b981' : '#ef4444';
+  const iconHtml = `
+      <div style="background-color: ${markerColor}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); font-weight: bold; font-size: 11px;">
+          ${count}
+      </div>
+  `;
+  const icon = L.divIcon({ html: iconHtml, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
+  clientGroupIconCache[cacheKey] = icon;
+  return icon;
+};
+
 export default function AdminDashboard({ 
   routers: propRouters = [], 
   oltPorts: propOltPorts = [], 
@@ -108,17 +162,28 @@ export default function AdminDashboard({
   const [apiOltPorts, setApiOltPorts] = useState([]);
   const [apiNodes, setApiNodes] = useState([]);
   const [apiUsers, setApiUsers] = useState([]);
-  const [apiSelectedRouter, setApiSelectedRouter] = useState(null);
-  // New UI states
+  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
+  const [apiSelectedRouter, setApiSelectedRouter] = useState(() => {
+     if (localStorage.getItem('lock_router') === 'true') {
+         const saved = localStorage.getItem('locked_router_id');
+         if (saved) return Number(saved);
+     }
+     return null;
+  });
+  
   const [mapType, setMapType] = useState(() => {
     try { return sessionStorage.getItem('dashboard_map_type') || 'vector'; }
     catch(e) { return 'vector'; }
-  }); // 'vector' or 'satellite'
+  });
   
+  // Save mapType to session storage
   useEffect(() => {
-    try { sessionStorage.setItem('dashboard_map_type', mapType); }
-    catch(e) {}
+    try { sessionStorage.setItem('dashboard_map_type', mapType); } catch(e){}
   }, [mapType]);
+
+  const [mapZoom, setMapZoom] = useState(8);
+  const [visibleBounds, setVisibleBounds] = useState(null);
+  const [activePopup, setActivePopup] = useState(null); // { id: string|number, type: string }
 
   const [showClients, setShowClients] = useState(() => {
     try { const v = sessionStorage.getItem('dashboard_show_clients'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
@@ -140,6 +205,11 @@ export default function AdminDashboard({
   const [eventLogs, setEventLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [visibleSearchCount, setVisibleSearchCount] = useState(7);
+
+  useEffect(() => {
+    setVisibleSearchCount(7);
+  }, [searchTerm]);
   const [isDeferredReady, setIsDeferredReady] = useState(false);
 
   useEffect(() => {
@@ -184,7 +254,9 @@ export default function AdminDashboard({
   const [selectedCable, setSelectedCable] = useState(null);
   const [editingCable, setEditingCable] = useState(null);
   const [cableVertices, setCableVertices] = useState([]);
+  const cablePolylineRef = useRef(null);
   const [activeGroupDetailNode, setActiveGroupDetailNode] = useState(null);
+  const [activeGroupDetailClient, setActiveGroupDetailClient] = useState(null);
   const [cableHistory, setCableHistory] = useState([]);
   const [customAlert, setCustomAlert] = useState({ show: false, title: "", message: "", type: "info" });
   const [customConfirm, setCustomConfirm] = useState({ show: false, title: "", message: "", onConfirm: null, onCancel: null });
@@ -403,6 +475,12 @@ export default function AdminDashboard({
             topologyNodeId: r.topologyNodeId !== undefined ? r.topologyNodeId : old.topologyNodeId,
             roadCoordinates: r.roadCoordinates !== undefined ? r.roadCoordinates : old.roadCoordinates,
             whatsapp: r.whatsapp !== undefined ? r.whatsapp : old.whatsapp,
+            address: r.address !== undefined ? r.address : old.address,
+            disabled: r.disabled !== undefined ? r.disabled : old.disabled,
+            rxBps: r.rxBps !== undefined ? r.rxBps : old.rxBps,
+            txBps: r.txBps !== undefined ? r.txBps : old.txBps,
+            rxHuman: r.rxHuman !== undefined ? r.rxHuman : old.rxHuman,
+            txHuman: r.txHuman !== undefined ? r.txHuman : old.txHuman,
             photoUrl: r.photoUrl !== undefined ? r.photoUrl : old.photoUrl,
             photoUrl2: r.photoUrl2 !== undefined ? r.photoUrl2 : old.photoUrl2,
             photoUrl3: r.photoUrl3 !== undefined ? r.photoUrl3 : old.photoUrl3,
@@ -478,6 +556,19 @@ export default function AdminDashboard({
       : pppoeUsers;
   }, [pppoeUsers, selectedRouter]);
 
+  const visibleUsersCount = useMemo(() => {
+    if (!visibleBounds) return 0;
+    let count = 0;
+    filteredUsers.forEach(u => {
+      if (isValidCoord(u.latitude, u.longitude) && visibleBounds.contains([Number(u.latitude), Number(u.longitude)])) {
+        count++;
+      }
+    });
+    return count;
+  }, [filteredUsers, visibleBounds]);
+
+  const shouldShowClients = showClients && (mapZoom >= 18 || visibleUsersCount < 50);
+
   const searchResults = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term || term.length < 2) return [];
@@ -494,7 +585,7 @@ export default function AdminDashboard({
       if (r.name?.toLowerCase().includes(term))
         results.push({ ...r, _type: 'router', _label: r.name, _icon: 'bi-router-fill', _color: '#0ea5e9' });
     });
-    return results.slice(0, 10);
+    return results;
   }, [searchTerm, filteredUsers, filteredNodes, routers]);
 
   // Real bandwidth data from socket (All Routers)
@@ -531,12 +622,15 @@ export default function AdminDashboard({
   const allCoordinates = useMemo(() => {
     if (!isDeferredReady) return [];
     const coords = [];
-    routers.forEach(r => { if (isValidCoord(r.latitude, r.longitude)) coords.push({ lat: Number(r.latitude), lng: Number(r.longitude) }); });
+    routers.forEach(r => {
+      if (selectedRouter && Number(r.id) !== Number(selectedRouter)) return;
+      if (isValidCoord(r.latitude, r.longitude)) coords.push({ lat: Number(r.latitude), lng: Number(r.longitude) });
+    });
     filteredOltPorts.forEach(p => { if (isValidCoord(p.latitude, p.longitude)) coords.push({ lat: Number(p.latitude), lng: Number(p.longitude) }); });
     filteredNodes.forEach(n => { if (isValidCoord(n.latitude, n.longitude)) coords.push({ lat: Number(n.latitude), lng: Number(n.longitude) }); });
     filteredUsers.forEach(u => { if (isValidCoord(u.latitude, u.longitude)) coords.push({ lat: Number(u.latitude), lng: Number(u.longitude) }); });
     return coords;
-  }, [routers, filteredOltPorts, filteredNodes, filteredUsers, isDeferredReady]);
+  }, [routers, filteredOltPorts, filteredNodes, filteredUsers, isDeferredReady, selectedRouter]);
 
   useEffect(() => {
     if (allCoordinates.length > 0) {
@@ -549,23 +643,87 @@ export default function AdminDashboard({
     }
   }, [allCoordinates]);
 
-  const hasOnlineUser = useCallback((nodeId) => {
-    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
-    if (directUsers.some(u => u.isOnline)) return true;
-    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
-    return childNodes.some(child => hasOnlineUser(child.id));
+  const userStatusMap = useMemo(() => {
+    const hasAnyMap = new Map();
+    const hasOnlineMap = new Map();
+
+    // Group users by topologyNodeId for O(1) lookup
+    const usersByNode = new Map();
+    filteredUsers.forEach(u => {
+      if (u.topologyNodeId) {
+        if (!usersByNode.has(u.topologyNodeId)) {
+          usersByNode.set(u.topologyNodeId, []);
+        }
+        usersByNode.get(u.topologyNodeId).push(u);
+      }
+    });
+
+    // Group children nodes by parentNodeId for O(1) lookup
+    const childrenByNode = new Map();
+    filteredNodes.forEach(n => {
+      const parentId = n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId;
+      if (parentId) {
+        if (!childrenByNode.has(parentId)) {
+          childrenByNode.set(parentId, []);
+        }
+        childrenByNode.get(parentId).push(n);
+      }
+    });
+
+    // Helper functions with local caching
+    const checkAny = (nodeId) => {
+      if (hasAnyMap.has(nodeId)) return hasAnyMap.get(nodeId);
+      
+      const direct = usersByNode.get(nodeId);
+      if (direct && direct.length > 0) {
+        hasAnyMap.set(nodeId, true);
+        return true;
+      }
+      
+      const children = childrenByNode.get(nodeId) || [];
+      const childHasAny = children.some(child => checkAny(child.id));
+      hasAnyMap.set(nodeId, childHasAny);
+      return childHasAny;
+    };
+
+    const checkOnline = (nodeId) => {
+      if (hasOnlineMap.has(nodeId)) return hasOnlineMap.get(nodeId);
+
+      const direct = usersByNode.get(nodeId) || [];
+      if (direct.some(u => u.isOnline)) {
+        hasOnlineMap.set(nodeId, true);
+        return true;
+      }
+
+      const children = childrenByNode.get(nodeId) || [];
+      const childHasOnline = children.some(child => checkOnline(child.id));
+      hasOnlineMap.set(nodeId, childHasOnline);
+      return childHasOnline;
+    };
+
+    // Precompute for all nodes
+    filteredNodes.forEach(n => {
+      checkAny(n.id);
+      checkOnline(n.id);
+    });
+
+    return { hasAnyMap, hasOnlineMap };
   }, [filteredUsers, filteredNodes]);
 
+  const hasOnlineUser = useCallback((nodeId) => {
+    return userStatusMap.hasOnlineMap.get(nodeId) || false;
+  }, [userStatusMap]);
+
   const hasAnyUser = useCallback((nodeId) => {
-    const directUsers = filteredUsers.filter(u => u.topologyNodeId === nodeId);
-    if (directUsers.length > 0) return true;
-    const childNodes = filteredNodes.filter(n => (n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId) === nodeId);
-    return childNodes.some(child => hasAnyUser(child.id));
-  }, [filteredUsers, filteredNodes]);
+    return userStatusMap.hasAnyMap.get(nodeId) || false;
+  }, [userStatusMap]);
 
   const connections = useMemo(() => {
     if (!showLines || !isDeferredReady) return [];
     const lines = [];
+    
+    // Create a node Map for O(1) lookups inside the loops
+    const nodesMap = new Map(nodes.map(n => [n.id, n]));
 
     filteredOltPorts.forEach(port => {
       const router = routers.find(r => r.id === port.routerId);
@@ -603,7 +761,7 @@ export default function AdminDashboard({
     filteredNodes.forEach(node => {
       const parentId = node.incomingLinks?.[0]?.fromNodeId || node.parentNodeId;
       if (parentId) {
-        const parent = filteredNodes.find(n => n.id === parentId);
+        const parent = nodesMap.get(parentId);
         if (isValidCoord(parent?.latitude, parent?.longitude) && isValidCoord(node.latitude, node.longitude)) {
           const anyUser = hasAnyUser(node.id);
           const isOnline = anyUser ? hasOnlineUser(node.id) : true;
@@ -627,10 +785,10 @@ export default function AdminDashboard({
       }
     });
 
-    if (showClients) {
+    if (shouldShowClients) {
         filteredUsers.forEach(user => {
         if (user.topologyNodeId) {
-            const node = filteredNodes.find(n => n.id === user.topologyNodeId);
+            const node = nodesMap.get(user.topologyNodeId);
             if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
             const isUserOnline = user.isOnline;
             lines.push({
@@ -649,9 +807,24 @@ export default function AdminDashboard({
     }
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, showClients, isDeferredReady]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady]);
+
+  const visibleConnections = useMemo(() => {
+    return connections.filter(line => {
+      // 1. Zoom level LOD: hide client lines when zoomed out
+      if (line.type === 'odp-to-client' && !shouldShowClients) {
+        return false;
+      }
+      // Hide odc/odp lines when zoomed out further
+      if ((line.type === 'odc-to-odp' || line.type === 'olt-to-odc' || line.type === 'node-to-node' || line.type === 'router-to-olt') && mapZoom < 12) {
+        return false;
+      }
+      return true;
+    });
+  }, [connections, mapZoom, shouldShowClients]);
 
   const handleMarkerClick = useCallback((entity, type) => {
+    setActivePopup({ id: entity.id, type });
     if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
       // Menambahkan offset latitude sekitar +0.0006 derajat agar popup detail (keterangan) 
       // berada tepat di tengah layar, bukan pin ikonnya yang tertutup di bawah.
@@ -673,8 +846,29 @@ export default function AdminDashboard({
     else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
    }, [onNodeClick, onOltPortClick, mapInstance]);
 
-  const handleGroupMarkerClick = useCallback((centerEntity) => {
+  const handleGroupMarkerClick = useCallback((centerEntity, index) => {
     setActiveGroupDetailNode(null);
+    setActivePopup({ id: index, type: 'group' });
+    if (mapInstance && centerEntity.latitude && centerEntity.longitude && isValidCoord(centerEntity.latitude, centerEntity.longitude)) {
+      const offsetLat = Number(centerEntity.latitude) + 0.0006;
+      const targetLatLng = L.latLng(offsetLat, Number(centerEntity.longitude));
+      const actualLatLng = L.latLng(Number(centerEntity.latitude), Number(centerEntity.longitude));
+      mapInstance.stop();
+      
+      const currentZoom = mapInstance.getZoom();
+      const dist = mapInstance.getCenter().distanceTo(actualLatLng);
+      
+      if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
+        mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+      } else {
+        mapInstance.flyTo(targetLatLng, 18, { animate: true, duration: 1.2 });
+      }
+    }
+  }, [mapInstance]);
+
+  const handleGroupClientMarkerClick = useCallback((centerEntity, index) => {
+    setActiveGroupDetailClient(null);
+    setActivePopup({ id: index, type: 'clientGroup' });
     if (mapInstance && centerEntity.latitude && centerEntity.longitude && isValidCoord(centerEntity.latitude, centerEntity.longitude)) {
       const offsetLat = Number(centerEntity.latitude) + 0.0006;
       const targetLatLng = L.latLng(offsetLat, Number(centerEntity.longitude));
@@ -720,95 +914,230 @@ export default function AdminDashboard({
     }
   };
 
+  const handleSearchScroll = (e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    if (scrollHeight - scrollTop - clientHeight < 40) {
+      setVisibleSearchCount(prev => Math.min(prev + 7, searchResults.length));
+    }
+  };
 
-  const renderGroupedEntityPopup = (group) => {
+
+  const renderGroupedEntityPopup = (group, index) => {
+    const isOpen = activePopup?.id === index && activePopup?.type === 'group';
     const entity = activeGroupDetailNode;
     const conf = entity ? (MARKER_CONFIG[entity.type] || MARKER_CONFIG.client) : null;
 
     return (
-      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`}>
-          <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
-              {/* Left Column: Stacked List */}
-              <div className="border-right-custom" style={{ width: '230px', flexShrink: 0, paddingRight: '12px' }}>
-                  <div className="popup-header d-flex align-items-center gap-2 mb-2">
-                      <div className="rounded-circle d-flex align-items-center justify-content-center text-white bg-primary" style={{ width: '24px', height: '24px', flexShrink: 0 }}>
-                          <i className="bi bi-diagram-3" style={{ fontSize: '11px' }}></i>
+      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+          {isOpen ? (
+              <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
+                  {/* Left Column: Stacked List */}
+                  <div className="border-right-custom" style={{ width: '230px', flexShrink: 0, paddingRight: '12px' }}>
+                      <div className="popup-header d-flex align-items-center gap-2 mb-2">
+                          <div className="rounded-circle d-flex align-items-center justify-content-center text-white bg-primary" style={{ width: '24px', height: '24px', flexShrink: 0 }}>
+                              <i className="bi bi-diagram-3" style={{ fontSize: '11px' }}></i>
+                          </div>
+                          <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '12px', maxWidth: '160px' }}>{group.length} Perangkat Bertumpuk</h6>
                       </div>
-                      <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '12px', maxWidth: '160px' }}>{group.length} Perangkat Bertumpuk</h6>
-                  </div>
-                  <div className="popup-body mt-2 custom-scrollbar" style={{ fontSize: '11px', maxHeight: '200px', overflowY: 'auto' }}>
-                      {group.map((item, i) => {
-                          const isSelected = activeGroupDetailNode?.id === item.id;
-                          return (
-                              <div key={i} className={`py-1 px-2 mb-1 rounded d-flex justify-content-between align-items-center ${isSelected ? 'bg-primary-subtle text-primary-emphasis fw-semibold' : ''}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
-                                  <div className="text-truncate" style={{ maxWidth: '120px' }}>
-                                      <span className="d-block text-truncate" style={{ fontSize: '11px' }}>{item.name}</span>
+                      <div className="popup-body mt-2 custom-scrollbar" style={{ fontSize: '11px', maxHeight: '200px', overflowY: 'auto' }}>
+                          {group.map((item, i) => {
+                              const isSelected = activeGroupDetailNode?.id === item.id;
+                              return (
+                                  <div key={i} className={`py-1 px-2 mb-1 rounded d-flex justify-content-between align-items-center ${isSelected ? 'bg-primary-subtle text-primary-emphasis fw-semibold' : ''}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
+                                      <div className="text-truncate" style={{ maxWidth: '120px' }}>
+                                          <span className="d-block text-truncate" style={{ fontSize: '11px' }}>{item.name}</span>
+                                      </div>
+                                      <button 
+                                          className={`btn btn-sm ${isSelected ? 'btn-primary text-white' : 'btn-outline-primary'}`} 
+                                          style={{ fontSize: '9px', padding: '2px 6px' }} 
+                                          onClick={() => handleGroupNodeDetailClick(item)}
+                                      >
+                                          Detail
+                                      </button>
                                   </div>
-                                  <button 
-                                      className={`btn btn-sm ${isSelected ? 'btn-primary text-white' : 'btn-outline-primary'}`} 
-                                      style={{ fontSize: '9px', padding: '2px 6px' }} 
-                                      onClick={() => handleGroupNodeDetailClick(item)}
-                                  >
-                                      Detail
-                                  </button>
+                              );
+                          })}
+                      </div>
+                  </div>
+
+                  {/* Right Column: Node Details or Beautiful Placeholder */}
+                  <div className="d-flex flex-column" style={{ flexGrow: 1, minWidth: '280px' }}>
+                      {entity ? (
+                          <>
+                              <div className="popup-header d-flex align-items-center gap-2 mb-2 pb-2 border-bottom">
+                                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: conf.color || '#000', flexShrink: 0 }}>
+                                      <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
+                                  </div>
+                                  <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.name}</h6>
                               </div>
-                          );
-                      })}
+                              <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                                  <div className="mb-2">
+                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Tipe</span>
+                                      <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span>
+                                  </div>
+                                  {entity.description && (
+                                      <div className="mb-2">
+                                          <span className="text-muted d-block" style={{ fontSize: '10px' }}>Details</span>
+                                          <span className="text-body">{entity.description}</span>
+                                      </div>
+                                  )}
+                                  <div className="mb-2">
+                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span>
+                                      <span className={`badge ${entity.isOnline === false ? 'bg-danger text-white' : 'bg-success text-white'}`}>
+                                          {entity.isOnline === false ? 'Offline' : 'Online / Aktif'}
+                                      </span>
+                                  </div>
+
+                                  {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
+                                      <div className="mt-2 p-2 bg-light rounded border mb-2">
+                                          <span className="d-block mb-1 text-muted fw-bold" style={{ fontSize: '10px' }}><i className="bi-image"></i> Preview Foto Lapangan:</span>
+                                          <div className="d-flex gap-2 overflow-auto pb-1">
+                                              {(() => {
+                                                  const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                                  return photos.map((url, index) => (
+                                                      <div 
+                                                          key={index} 
+                                                          className="flex-shrink-0"
+                                                          style={{ cursor: 'pointer' }}
+                                                          onClick={() => setLightbox({ isOpen: true, index, images: photos })}
+                                                          title="Klik untuk memperbesar"
+                                                      >
+                                                          <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '65px', width: 'auto', objectFit: 'cover' }} />
+                                                      </div>
+                                                  ));
+                                              })()}
+                                          </div>
+                                      </div>
+                                  )}
+
+                                  <div className="d-flex gap-2 mt-2">
+                                      <button className="btn btn-sm btn-outline-primary flex-grow-1" style={{ fontSize: '10px' }} onClick={() => {
+                                          setEditEntity(entity);
+                                          setEditForm({
+                                              whatsapp: entity.whatsapp || "",
+                                              address: entity.address || "",
+                                              photoUrl: entity.photoUrl || "",
+                                              photoUrl2: entity.photoUrl2 || "",
+                                              photoUrl3: entity.photoUrl3 || "",
+                                              file: null,
+                                              file2: null,
+                                              file3: null
+                                          });
+                                      }}>
+                                          <i className="bi bi-pencil-square me-1"></i> Edit Info
+                                      </button>
+                                      {entity.latitude && (
+                                          <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '10px' }}>
+                                              <i className="bi bi-geo-alt"></i> Maps
+                                          </a>
+                                      )}
+                                  </div>
+                              </div>
+                          </>
+                      ) : (
+                          <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted p-3 text-center" style={{ flexGrow: 1, border: '1px dashed rgba(0,0,0,0.1)', borderRadius: '8px', minHeight: '200px' }}>
+                              <i className="bi bi-info-circle mb-2 text-primary" style={{ fontSize: '24px' }}></i>
+                              <span style={{ fontSize: '11px', lineHeight: '1.4' }}>Pilih salah satu perangkat di sebelah kiri untuk melihat detail informasi lapangan.</span>
+                          </div>
+                      )}
                   </div>
               </div>
+          ) : (
+              <div style={{ padding: '6px 10px', fontSize: '11px', color: '#94a3b8' }}><i className="bi bi-arrow-repeat spin me-1"></i> Memuat informasi...</div>
+          )}
+      </Popup>
+    );
+  };
 
-              {/* Right Column: Node Details or Beautiful Placeholder */}
-              <div className="d-flex flex-column" style={{ flexGrow: 1, minWidth: '280px' }}>
-                  {entity ? (
-                      <>
-                          <div className="popup-header d-flex align-items-center gap-2 mb-2 pb-2 border-bottom">
-                              <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: conf.color || '#000', flexShrink: 0 }}>
-                                  <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
-                              </div>
-                              <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.name}</h6>
+  const renderGroupedClientPopup = (group, index) => {
+    const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
+    const entity = activeGroupDetailClient;
+    const conf = MARKER_CONFIG.client;
+
+    return (
+      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+          {isOpen ? (
+              <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
+                  {/* Left Column: Stacked List */}
+                  <div className="border-right-custom" style={{ width: '230px', flexShrink: 0, paddingRight: '12px' }}>
+                      <div className="popup-header d-flex align-items-center gap-2 mb-2">
+                          <div className="rounded-circle d-flex align-items-center justify-content-center text-white bg-primary" style={{ width: '24px', height: '24px', flexShrink: 0 }}>
+                              <i className="bi bi-people-fill" style={{ fontSize: '11px' }}></i>
                           </div>
-                          <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                              <div className="mb-2">
-                                  <span className="text-muted d-block" style={{ fontSize: '10px' }}>Tipe</span>
-                                  <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span>
-                              </div>
-                              {entity.description && (
-                                  <div className="mb-2">
-                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Details</span>
-                                      <span className="text-body">{entity.description}</span>
-                                  </div>
-                              )}
-                              <div className="mb-2">
-                                  <span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span>
-                                  <span className={`badge ${hasAnyUser(entity.id) && !hasOnlineUser(entity.id) ? 'bg-danger text-white' : 'bg-success text-white'}`}>
-                                      {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) ? 'Offline' : 'Online / Aktif'}
-                                  </span>
-                              </div>
-
-                              {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
-                                  <div className="mt-2 p-2 bg-light rounded border mb-2">
-                                      <span className="d-block mb-1 text-muted fw-bold" style={{ fontSize: '10px' }}><i className="bi-image"></i> Preview Foto Lapangan:</span>
-                                      <div className="d-flex gap-2 overflow-auto pb-1">
-                                          {(() => {
-                                              const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
-                                              return photos.map((url, index) => (
-                                                  <div 
-                                                      key={index} 
-                                                      className="flex-shrink-0"
-                                                      style={{ cursor: 'pointer' }}
-                                                      onClick={() => setLightbox({ isOpen: true, index, images: photos })}
-                                                      title="Klik untuk memperbesar"
-                                                  >
-                                                      <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '65px', width: 'auto', objectFit: 'cover' }} />
-                                                  </div>
-                                              ));
-                                          })()}
+                          <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '12px', maxWidth: '160px' }}>{group.length} Client Bertumpuk</h6>
+                      </div>
+                      <div className="popup-body mt-2 custom-scrollbar" style={{ fontSize: '11px', maxHeight: '200px', overflowY: 'auto' }}>
+                          {group.map((item, i) => {
+                              const isSelected = activeGroupDetailClient?.id === item.id;
+                              return (
+                                  <div key={i} className={`py-1 px-2 mb-1 rounded d-flex justify-content-between align-items-center ${isSelected ? 'bg-primary-subtle text-primary-emphasis fw-semibold' : ''}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
+                                      <div className="text-truncate" style={{ maxWidth: '120px' }}>
+                                          <span className="d-block text-truncate" style={{ fontSize: '11px' }}>{item.username}</span>
                                       </div>
+                                      <button 
+                                          className={`btn btn-sm ${isSelected ? 'btn-primary text-white' : 'btn-outline-primary'}`} 
+                                          style={{ fontSize: '9px', padding: '2px 6px' }} 
+                                          onClick={() => setActiveGroupDetailClient(item)}
+                                      >
+                                          Detail
+                                      </button>
                                   </div>
-                              )}
+                              );
+                          })}
+                      </div>
+                  </div>
 
-                              <div className="d-flex gap-2 mt-2">
-                                  <button className="btn btn-sm btn-outline-primary flex-grow-1" style={{ fontSize: '10px' }} onClick={() => {
+                  {/* Right Column: Client Details or Beautiful Placeholder */}
+                  <div className="d-flex flex-column" style={{ flexGrow: 1, minWidth: '280px' }}>
+                      {entity ? (
+                          <>
+                              <div className="popup-header d-flex align-items-center gap-2 mb-2 pb-2 border-bottom">
+                                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: entity.isOnline ? '#10b981' : '#ef4444', flexShrink: 0 }}>
+                                      <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
+                                  </div>
+                                  <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.username}</h6>
+                              </div>
+                              <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                                  <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Profile</span><strong>{entity.profile || '—'}</strong></div>
+                                  <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
+                                  {entity.isOnline && entity.uptime && (
+                                      <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
+                                  )}
+                                  <div className="mb-2">
+                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Traffic Rate</span>
+                                      <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
+                                  </div>
+                                  <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+
+                                  {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
+                                      <div className="mt-3 p-2 bg-light rounded border">
+                                          <strong className="d-block mb-1 border-bottom pb-1" style={{ fontSize: '10px' }}>Informasi Lapangan</strong>
+                                          {entity.whatsapp && <div className="mb-2"><i className="bi bi-whatsapp me-1 text-success"></i> <a href={`https://wa.me/${entity.whatsapp}`} target="_blank" rel="noreferrer" className="text-decoration-none text-success fw-bold">{entity.whatsapp}</a></div>}
+                                          {entity.address && <div className="mb-2" style={{ fontSize: '10px' }}><i className="bi bi-geo-alt me-1 text-danger"></i> <span className="text-muted">{entity.address}</span></div>}
+                                          {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
+                                              <div className="mt-2">
+                                                  <span className="d-block mb-1 text-muted" style={{ fontSize: '9px' }}><i className="bi bi-image me-1"></i> Preview Foto Lokasi (Klik untuk perbesar):</span>
+                                                  <div className="d-flex gap-2 overflow-auto pb-1" style={{ maxWidth: '100%' }}>
+                                                      {(() => {
+                                                          const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                                          return photos.map((url, index) => (
+                                                              <div 
+                                                                  key={index} 
+                                                                  className="flex-shrink-0"
+                                                                  style={{ cursor: 'pointer' }}
+                                                                  onClick={() => setLightbox({ isOpen: true, index, images: photos })}
+                                                                  title="Klik untuk memperbesar"
+                                                              >
+                                                                  <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '70px', width: 'auto', objectFit: 'cover' }} />
+                                                              </div>
+                                                          ));
+                                                      })()}
+                                                  </div>
+                                              </div>
+                                          )}
+                                      </div>
+                                  )}
+                                  <button className="btn btn-sm w-100 mt-2 btn-outline-primary" style={{ fontSize: '10px' }} onClick={() => {
                                       setEditEntity(entity);
                                       setEditForm({
                                           whatsapp: entity.whatsapp || "",
@@ -821,165 +1150,228 @@ export default function AdminDashboard({
                                           file3: null
                                       });
                                   }}>
-                                      <i className="bi bi-pencil-square me-1"></i> Edit Info
+                                      <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
                                   </button>
-                                  {entity.latitude && (
-                                      <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '10px' }}>
-                                          <i className="bi bi-geo-alt"></i> Maps
-                                      </a>
-                                  )}
                               </div>
+                          </>
+                      ) : (
+                          <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted p-3 text-center" style={{ flexGrow: 1, border: '1px dashed rgba(0,0,0,0.1)', borderRadius: '8px', minHeight: '200px' }}>
+                              <i className="bi bi-info-circle mb-2 text-primary" style={{ fontSize: '24px' }}></i>
+                              <span style={{ fontSize: '11px', lineHeight: '1.4' }}>Pilih salah satu client di sebelah kiri untuk melihat detail informasi lapangan.</span>
                           </div>
-                      </>
-                  ) : (
-                      <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted p-3 text-center" style={{ flexGrow: 1, border: '1px dashed rgba(0,0,0,0.1)', borderRadius: '8px', minHeight: '200px' }}>
-                          <i className="bi bi-info-circle mb-2 text-primary" style={{ fontSize: '24px' }}></i>
-                          <span style={{ fontSize: '11px', lineHeight: '1.4' }}>Pilih salah satu perangkat di sebelah kiri untuk melihat detail informasi lapangan.</span>
-                      </div>
-                  )}
+                      )}
+                  </div>
               </div>
-          </div>
+          ) : (
+              <div style={{ padding: '6px 10px', fontSize: '11px', color: '#94a3b8' }}><i className="bi bi-arrow-repeat spin me-1"></i> Memuat informasi...</div>
+          )}
       </Popup>
     );
   };
 
   const renderEntityPopup = (entity, type) => {
+    const isOpen = activePopup?.id === entity.id && activePopup?.type === type;
     const tKey = type === 'node' ? entity.type : type;
     const conf = MARKER_CONFIG[tKey] || MARKER_CONFIG.client;
     
     return (
-        <Popup minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`}>
-            <div className="popup-header d-flex align-items-center gap-2">
-                <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: conf.color || '#000', flexShrink: 0 }}>
-                    <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
-                </div>
-                <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
-            </div>
-            <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
-                {type === 'router' && (
-                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Host</span><strong>{entity.host}</strong></div>
-                )}
-                {type === 'oltPort' && (
-                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Port</span><strong>{entity.port}</strong></div>
-                )}
-                {type === 'client' && (
-                    <>
-                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
-                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
-                    </>
-                )}
-                {type === 'node' && (
-                    <>
-                        <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Type</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
-                        {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Details</span><span>{entity.description}</span></div>}
-                        {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) && <div className="mb-2"><span className="badge bg-danger">Offline</span></div>}
+        <Popup minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+            {isOpen ? (
+                <>
+                    <div className="popup-header d-flex align-items-center gap-2">
+                        <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: conf.color || '#000', flexShrink: 0 }}>
+                            <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
+                        </div>
+                        <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
+                    </div>
+                    <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
+                        {type === 'router' && (
+                            <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Host</span><strong>{entity.host}</strong></div>
+                        )}
+                        {type === 'oltPort' && (
+                            <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Port</span><strong>{entity.port}</strong></div>
+                        )}
+                        {type === 'client' && (
+                            <>
+                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Profile</span><strong>{entity.profile || '—'}</strong></div>
+                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
+                                {entity.isOnline && entity.uptime && (
+                                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
+                                )}
+                                <div className="mb-2">
+                                    <span className="text-muted d-block" style={{ fontSize: '11px' }}>Traffic Rate</span>
+                                    <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
+                                </div>
+                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                            </>
+                        )}
+                        {type === 'node' && (
+                            <>
+                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Type</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
+                                {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Details</span><span>{entity.description}</span></div>}
+                                {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) && <div className="mb-2"><span className="badge bg-danger">Offline</span></div>}
 
-                    </>
-                )}
-                {(type === 'node' || type === 'client') && (
-                    <>
-                        {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
-                            <div className="mt-3 p-2 bg-light rounded border">
-                                <strong className="d-block mb-1 border-bottom pb-1" style={{ fontSize: '11px' }}>Informasi Lapangan</strong>
-                                {entity.whatsapp && <div className="mb-2"><i className="bi bi-whatsapp me-1 text-success"></i> <a href={`https://wa.me/${entity.whatsapp}`} target="_blank" rel="noreferrer" className="text-decoration-none text-success fw-bold">{entity.whatsapp}</a></div>}
-                                {entity.address && <div className="mb-2" style={{ fontSize: '11px' }}><i className="bi bi-geo-alt me-1 text-danger"></i> <span className="text-muted">{entity.address}</span></div>}
-                                {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
-                                    <div className="mt-2">
-                                        <span className="d-block mb-1 text-muted" style={{ fontSize: '10px' }}><i className="bi bi-image me-1"></i> Preview Foto Lokasi (Klik untuk perbesar):</span>
-                                        <div className="d-flex gap-2 overflow-auto pb-1" style={{ maxWidth: '100%' }}>
-                                            {(() => {
-                                                const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
-                                                return photos.map((url, index) => (
-                                                    <div 
-                                                        key={index} 
-                                                        className="flex-shrink-0"
-                                                        style={{ cursor: 'pointer' }}
-                                                        onClick={() => setLightbox({ isOpen: true, index, images: photos })}
-                                                        title="Klik untuk memperbesar"
-                                                    >
-                                                        <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '90px', width: 'auto', objectFit: 'cover', transition: 'transform 0.2s' }} />
-                                                    </div>
-                                                ));
-                                            })()}
-                                        </div>
+                            </>
+                        )}
+                        {(type === 'node' || type === 'client') && (
+                            <>
+                                {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
+                                    <div className="mt-3 p-2 bg-light rounded border">
+                                        <strong className="d-block mb-1 border-bottom pb-1" style={{ fontSize: '11px' }}>Informasi Lapangan</strong>
+                                        {entity.whatsapp && <div className="mb-2"><i className="bi bi-whatsapp me-1 text-success"></i> <a href={`https://wa.me/${entity.whatsapp}`} target="_blank" rel="noreferrer" className="text-decoration-none text-success fw-bold">{entity.whatsapp}</a></div>}
+                                        {entity.address && <div className="mb-2" style={{ fontSize: '11px' }}><i className="bi bi-geo-alt me-1 text-danger"></i> <span className="text-muted">{entity.address}</span></div>}
+                                        {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
+                                            <div className="mt-2">
+                                                <span className="d-block mb-1 text-muted" style={{ fontSize: '10px' }}><i className="bi bi-image me-1"></i> Preview Foto Lokasi (Klik untuk perbesar):</span>
+                                                <div className="d-flex gap-2 overflow-auto pb-1" style={{ maxWidth: '100%' }}>
+                                                    {(() => {
+                                                        const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                                        return photos.map((url, index) => (
+                                                            <div 
+                                                                key={index} 
+                                                                className="flex-shrink-0"
+                                                                style={{ cursor: 'pointer' }}
+                                                                onClick={() => setLightbox({ isOpen: true, index, images: photos })}
+                                                                title="Klik untuk memperbesar"
+                                                            >
+                                                                <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '90px', width: 'auto', objectFit: 'cover', transition: 'transform 0.2s' }} />
+                                                            </div>
+                                                        ));
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
-                            </div>
+                                <button className="btn btn-sm w-100 mt-2 btn-outline-primary" style={{ fontSize: '12px' }} onClick={() => {
+                                    setEditEntity(entity);
+                                    setEditForm({
+                                        whatsapp: entity.whatsapp || "",
+                                        address: entity.address || "",
+                                        photoUrl: entity.photoUrl || "",
+                                        photoUrl2: entity.photoUrl2 || "",
+                                        photoUrl3: entity.photoUrl3 || "",
+                                        file: null,
+                                        file2: null,
+                                        file3: null
+                                    });
+                                }}>
+                                    <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
+                                </button>
+                            </>
                         )}
-                        <button className="btn btn-sm w-100 mt-2 btn-outline-primary" style={{ fontSize: '12px' }} onClick={() => {
-                            setEditEntity(entity);
-                            setEditForm({
-                                whatsapp: entity.whatsapp || "",
-                                address: entity.address || "",
-                                photoUrl: entity.photoUrl || "",
-                                photoUrl2: entity.photoUrl2 || "",
-                                photoUrl3: entity.photoUrl3 || "",
-                                file: null,
-                                file2: null,
-                                file3: null
-                            });
-                        }}>
-                            <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
-                        </button>
-                    </>
-                )}
-                {entity.latitude && (
-                    <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm w-100 mt-2 fw-medium border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '12px' }}>
-                        Open in Google Maps <i className="bi bi-box-arrow-up-right ms-1"></i>
-                    </a>
-                )}
-            </div>
+                        {entity.latitude && (
+                            <a href={`https://maps.google.com/?q=${entity.latitude},${entity.longitude}`} target="_blank" rel="noreferrer" className={`btn btn-sm w-100 mt-2 fw-medium border ${isDarkMode ? 'btn-dark text-info border-secondary' : 'btn-light text-primary'}`} style={{ fontSize: '12px' }}>
+                                Open in Google Maps <i className="bi bi-box-arrow-up-right ms-1"></i>
+                            </a>
+                        )}
+                    </div>
+                </>
+            ) : (
+                <div style={{ padding: '6px 10px', fontSize: '11px', color: '#94a3b8' }}><i className="bi bi-arrow-repeat spin me-1"></i> Memuat informasi...</div>
+            )}
         </Popup>
     );
   };
 
+  const getClusterThreshold = (zoom) => {
+    if (zoom >= 19) return 0.000005; // ~0.5m (exact overlaps only)
+    if (zoom === 18) return 0.00003;  // ~3m
+    if (zoom === 17) return 0.00008;  // ~8m
+    if (zoom === 16) return 0.0002;   // ~22m
+    if (zoom === 15) return 0.0005;   // ~55m
+    if (zoom === 14) return 0.001;    // ~110m
+    if (zoom === 13) return 0.002;    // ~220m
+    if (zoom === 12) return 0.005;    // ~550m
+    return 0.01; // zoom <= 11
+  };
+
+  const groupedNodes = useMemo(() => {
+    const groupMap = new Map();
+    const threshold = getClusterThreshold(mapZoom);
+
+    filteredNodes.forEach(node => {
+        if (!isValidCoord(node.latitude, node.longitude)) return;
+        
+        // Create a grid key based on threshold for O(1) lookup bucketing
+        const latKey = Math.round(node.latitude / threshold);
+        const lngKey = Math.round(node.longitude / threshold);
+        const key = `${latKey}_${lngKey}`;
+        
+        if (!groupMap.has(key)) {
+            groupMap.set(key, []);
+        }
+        groupMap.get(key).push(node);
+    });
+
+    return Array.from(groupMap.values());
+  }, [filteredNodes, mapZoom]);
+
+  const groupedUsers = useMemo(() => {
+    const groupMap = new Map();
+    const threshold = getClusterThreshold(mapZoom);
+
+    filteredUsers.forEach(user => {
+        if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
+        
+        // Create a grid key based on threshold for O(1) lookup bucketing
+        const latKey = Math.round(user.latitude / threshold);
+        const lngKey = Math.round(user.longitude / threshold);
+        const key = `${latKey}_${lngKey}`;
+        
+        if (!groupMap.has(key)) {
+            groupMap.set(key, []);
+        }
+        groupMap.get(key).push(user);
+    });
+
+    return Array.from(groupMap.values());
+  }, [filteredUsers, mapZoom]);
+
   const renderMarkers = () => {
-    if (!isDeferredReady) return [];
-    const markers = [];
+    if (!isDeferredReady) return null;
+    const infraMarkers = [];
+    const clientMarkers = [];
+
     if (showNodes) {
         routers.forEach(router => {
         if (!isValidCoord(router.latitude, router.longitude)) return;
-        markers.push(
-            <Marker key={`router-${router.id}`} position={[Number(router.latitude), Number(router.longitude)]} icon={createCustomIcon(MARKER_CONFIG.router.color, MARKER_CONFIG.router.icon)} eventHandlers={{ click: () => handleMarkerClick(router, 'router') }}>
-                {renderEntityPopup(router, 'router')}
-            </Marker>
+        if (visibleBounds && !visibleBounds.contains([Number(router.latitude), Number(router.longitude)])) return;
+        
+        const isOpen = activePopup?.id === router.id && activePopup?.type === 'router';
+        infraMarkers.push(
+            <MemoizedMarker 
+                key={`router-${router.id}`} 
+                position={[Number(router.latitude), Number(router.longitude)]} 
+                icon={createCustomIcon(MARKER_CONFIG.router.color, MARKER_CONFIG.router.icon, !router.isOnline, 'router')} 
+                onClick={() => handleMarkerClick(router, 'router')}
+                isOpen={isOpen}
+                renderPopup={() => renderEntityPopup(router, 'router')}
+            />
         );
         });
 
         filteredOltPorts.forEach(port => {
         if (!isValidCoord(port.latitude, port.longitude)) return;
-        markers.push(
-            <Marker key={`olt-${port.id}`} position={[Number(port.latitude), Number(port.longitude)]} icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon)} eventHandlers={{ click: () => handleMarkerClick(port, 'oltPort') }}>
-                {renderEntityPopup(port, 'oltPort')}
-            </Marker>
+        if (visibleBounds && !visibleBounds.contains([Number(port.latitude), Number(port.longitude)])) return;
+        
+        const isOpen = activePopup?.id === port.id && activePopup?.type === 'oltPort';
+        infraMarkers.push(
+            <MemoizedMarker 
+                key={`olt-${port.id}`} 
+                position={[Number(port.latitude), Number(port.longitude)]} 
+                icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon, false, 'olt')} 
+                onClick={() => handleMarkerClick(port, 'oltPort')}
+                isOpen={isOpen}
+                renderPopup={() => renderEntityPopup(port, 'oltPort')}
+            />
         );
         });
 
-
-
-
-
         // GROUPING OVERLAPPING NODES (Cluster Simulation) - Highly Optimized O(N) Grid Bucketing
-        const groupMap = new Map();
-        const THRESHOLD = 0.0001; // Grouping distance threshold
-
-        filteredNodes.forEach(node => {
-            if (!isValidCoord(node.latitude, node.longitude)) return;
-            
-            // Create a grid key based on threshold for O(1) lookup bucketing
-            const latKey = Math.round(node.latitude / THRESHOLD);
-            const lngKey = Math.round(node.longitude / THRESHOLD);
-            const key = `${latKey}_${lngKey}`;
-            
-            if (!groupMap.has(key)) {
-                groupMap.set(key, []);
-            }
-            groupMap.get(key).push(node);
-        });
-
-        const groups = Array.from(groupMap.values());
-
-        groups.forEach((group, index) => {
+        groupedNodes.forEach((group, index) => {
+            const center = group[0];
+            if (visibleBounds && !visibleBounds.contains([Number(center.latitude), Number(center.longitude)])) return;
             if (group.length === 1) {
                 const node = group[0];
                 const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
@@ -987,58 +1379,84 @@ export default function AdminDashboard({
                 const isFaulty = anyUser && !hasOnlineUser(node.id);
                 const markerColor = isFaulty ? '#ef4444' : config.color;
 
-                markers.push(
-                    <Marker 
+                const isOpen = activePopup?.id === node.id && activePopup?.type === 'node';
+                infraMarkers.push(
+                    <MemoizedMarker 
                         key={`node-${node.id}`} 
                         position={[Number(node.latitude), Number(node.longitude)]} 
-                        icon={createCustomIcon(markerColor, config.icon, isFaulty)} 
-                        draggable={false}
-                        eventHandlers={{ 
-                            click: () => handleMarkerClick(node, 'node')
-                        }}
-                    >
-                        {renderEntityPopup(node, 'node')}
-                    </Marker>
+                        icon={createCustomIcon(markerColor, config.icon, isFaulty, 'node')} 
+                        onClick={() => handleMarkerClick(node, 'node')}
+                        isOpen={isOpen}
+                        renderPopup={() => renderEntityPopup(node, 'node')}
+                    />
                 );
             } else {
                 // Tampilkan badge marker tumpuk (Hanya ambil koordinat dari item pertama, tidak bisa di-drag sekaligus)
-                const center = group[0];
                 const anyFaulty = group.some(n => hasAnyUser(n.id) && !hasOnlineUser(n.id));
-                const iconHtml = `
-                    <div style="background-color: ${anyFaulty ? '#ef4444' : '#0ea5e9'}; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-weight: bold; font-size: 11px;">
-                        ${group.length}
-                    </div>
-                `;
-                const groupIcon = L.divIcon({ html: iconHtml, className: "", iconSize: [24, 24], iconAnchor: [12, 12] });
+                const groupIcon = getGroupIcon(group.length, anyFaulty);
                 
-                markers.push(
-                    <Marker 
+                const isOpen = activePopup?.id === index && activePopup?.type === 'group';
+                infraMarkers.push(
+                    <MemoizedMarker 
                         key={`group-${index}`} 
                         position={[Number(center.latitude), Number(center.longitude)]} 
                         icon={groupIcon}
-                        eventHandlers={{ click: () => handleGroupMarkerClick(center) }}
-                    >
-                        {renderGroupedEntityPopup(group)}
-                    </Marker>
+                        onClick={() => handleGroupMarkerClick(center, index)}
+                        isOpen={isOpen}
+                        renderPopup={() => renderGroupedEntityPopup(group, index)}
+                    />
                 );
             }
         });
     }
 
-    if (showClients) {
-        filteredUsers.forEach(user => {
-        if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
-        const isOnline = user.isOnline;
-        const markerColor = isOnline ? '#10b981' : '#ef4444';
-        markers.push(
-            <Marker key={`client-${user.id}`} position={[Number(user.latitude), Number(user.longitude)]} icon={createCustomIcon(markerColor, MARKER_CONFIG.client.icon, !isOnline)} eventHandlers={{ click: () => handleMarkerClick(user, 'client') }}>
-                {renderEntityPopup(user, 'client')}
-            </Marker>
-        );
+    if (shouldShowClients) {
+        groupedUsers.forEach((group, index) => {
+            const center = group[0];
+            if (visibleBounds && !visibleBounds.contains([Number(center.latitude), Number(center.longitude)])) return;
+
+            if (group.length === 1) {
+                const user = group[0];
+                const isOnline = user.isOnline;
+                const markerColor = isOnline ? '#10b981' : '#ef4444';
+                
+                const isOpen = activePopup?.id === user.id && activePopup?.type === 'client';
+                clientMarkers.push(
+                    <MemoizedMarker 
+                        key={`client-${user.id}`} 
+                        position={[Number(user.latitude), Number(user.longitude)]} 
+                        icon={createCustomIcon(markerColor, MARKER_CONFIG.client.icon, !isOnline, 'client')} 
+                        onClick={() => handleMarkerClick(user, 'client')}
+                        isOpen={isOpen}
+                        renderPopup={() => renderEntityPopup(user, 'client')}
+                    />
+                );
+            } else {
+                // Render clustered client marker showing the count of clients
+                const anyOnline = group.some(u => u.isOnline);
+                const groupIcon = getClientGroupIcon(group.length, anyOnline);
+                
+                const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
+                clientMarkers.push(
+                    <MemoizedMarker 
+                        key={`client-group-${index}`} 
+                        position={[Number(center.latitude), Number(center.longitude)]} 
+                        icon={groupIcon}
+                        onClick={() => handleGroupClientMarkerClick(center, index)}
+                        isOpen={isOpen}
+                        renderPopup={() => renderGroupedClientPopup(group, index)}
+                    />
+                );
+            }
         });
     }
 
-    return markers;
+    return (
+      <>
+        {infraMarkers}
+        {clientMarkers}
+      </>
+    );
   };
 
   const activeRouters = routers.filter(r => r.isOnline).length;
@@ -1088,6 +1506,7 @@ export default function AdminDashboard({
           
           const payload = {
               whatsapp: editForm.whatsapp,
+              address: editForm.address,
               photoUrl: photoUrl,
               photoUrl2: photoUrl2,
               photoUrl3: photoUrl3
@@ -1194,7 +1613,8 @@ export default function AdminDashboard({
           if (node.type === 'ODC') {
             await api.put(`/topology/odc/${nodeId}`, payload);
           } else {
-            await api.put(`/topology/odp/${nodeId}`, payload);
+            const realId = Number(nodeId) - 100000;
+            await api.put(`/topology/odp/${realId}`, payload);
           }
         }
       } else if (cable.type === 'odp-to-client') {
@@ -1255,7 +1675,8 @@ export default function AdminDashboard({
               if (node.type === 'ODC') {
                 await api.put(`/topology/odc/${nodeId}`, payload);
               } else {
-                await api.put(`/topology/odp/${nodeId}`, payload);
+                const realId = Number(nodeId) - 100000;
+                await api.put(`/topology/odp/${realId}`, payload);
               }
             }
           } else if (cable.type === 'odp-to-client') {
@@ -1294,6 +1715,61 @@ export default function AdminDashboard({
     );
   };
 
+  const vertexMarkers = useMemo(() => {
+    if (!editingCable) return null;
+    return cableVertices.map((vertex, idx) => {
+      if (idx === 0 || idx === cableVertices.length - 1) return null;
+      return (
+        <Marker
+          key={`vertex-${idx}`}
+          position={vertex}
+          draggable={true}
+          icon={L.divIcon({
+            className: 'custom-vertex-icon',
+            html: `<div class="vertex-handle-inner">${idx}</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          })}
+          eventHandlers={{
+            drag: (e) => {
+              if (cablePolylineRef.current) {
+                const newLatLng = e.target.getLatLng();
+                const currentLatLngs = cablePolylineRef.current.getLatLngs();
+                if (currentLatLngs && currentLatLngs[idx]) {
+                    currentLatLngs[idx] = newLatLng;
+                    cablePolylineRef.current.setLatLngs(currentLatLngs);
+                }
+              }
+            },
+            dragend: (e) => {
+              const newLatLng = e.target.getLatLng();
+              setCableVertices(prev => {
+                setCableHistory(h => [...h, prev]);
+                const updated = [...prev];
+                updated[idx] = [newLatLng.lat, newLatLng.lng];
+                return updated;
+              });
+            },
+            click: () => {
+              showConfirm(
+                "Apakah Anda yakin ingin menghapus titik belokan ini?",
+                () => {
+                  setCableVertices(prev => {
+                    setCableHistory(h => [...h, prev]);
+                    const updated = [...prev];
+                    updated.splice(idx, 1);
+                    return updated;
+                  });
+                },
+                "Hapus Titik Belokan"
+              );
+            }
+          }}
+        />
+      );
+    });
+  }, [editingCable, cableVertices, showConfirm]);
+
   return (
     <div className="container-fluid p-3 bg-body-secondary d-flex flex-column" style={{ height: '100vh', overflow: 'hidden', transition: 'background-color 0.3s' }}>
       
@@ -1310,13 +1786,36 @@ export default function AdminDashboard({
                     <select 
                         className="form-select form-select-sm border-0 shadow-none bg-transparent fw-medium" 
                         value={selectedRouter || ''} 
-                        onChange={(e) => setApiSelectedRouter(e.target.value)}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setApiSelectedRouter(val ? Number(val) : null);
+                            if (isRouterLocked && val) {
+                                localStorage.setItem('locked_router_id', val);
+                            }
+                        }}
                         style={{ width: 'auto', minWidth: '130px', cursor: 'pointer', paddingLeft: 0, boxShadow: 'none', outline: 'none' }}
                     >
                         {routers.map(r => (
                             <option key={r.id} value={r.id}>{r.name}</option>
                         ))}
                     </select>
+                    <button 
+                        className={`btn btn-sm p-0 ms-2 ${isRouterLocked ? 'text-primary' : 'text-muted'}`}
+                        onClick={() => {
+                            const newLocked = !isRouterLocked;
+                            setIsRouterLocked(newLocked);
+                            localStorage.setItem('lock_router', newLocked);
+                            if (newLocked && selectedRouter) {
+                                localStorage.setItem('locked_router_id', selectedRouter);
+                            } else {
+                                localStorage.removeItem('locked_router_id');
+                            }
+                        }}
+                        title={isRouterLocked ? "Buka kuncian router default" : "Kunci router ini sebagai default"}
+                        style={{ border: 'none', background: 'transparent' }}
+                    >
+                        <i className={`bi ${isRouterLocked ? 'bi-lock-fill' : 'bi-unlock'}`}></i>
+                    </button>
                 </div>
             )}
             <span className="badge bg-primary px-3 py-2 fs-6 rounded-pill d-flex align-items-center gap-2 shadow-sm">
@@ -1366,8 +1865,12 @@ export default function AdminDashboard({
                           </button>
                         )}
                         {showSearchResults && searchResults.length > 0 && (
-                          <div className="position-absolute top-100 start-0 w-100 mt-1 rounded-3 overflow-hidden shadow-lg search-dropdown" style={{ zIndex: 9999 }}>
-                            {searchResults.map((item) => (
+                          <div 
+                            className="position-absolute top-100 start-0 w-100 mt-1 rounded-3 overflow-hidden shadow-lg search-dropdown custom-scrollbar" 
+                            style={{ zIndex: 9999, maxHeight: '378px', overflowY: 'auto', pointerEvents: 'auto' }}
+                            onScroll={handleSearchScroll}
+                          >
+                            {searchResults.slice(0, visibleSearchCount).map((item) => (
                               <button
                                 key={`${item._type}-${item.id}`}
                                 type="button"
@@ -1397,7 +1900,9 @@ export default function AdminDashboard({
                         <div className="p-3 pt-0">
                             <div className="form-check form-switch mb-2">
                                 <input className="form-check-input" type="checkbox" role="switch" checked={showClients} onChange={(e) => setShowClients(e.target.checked)} />
-                                <label className="form-check-label small fw-medium">Show Clients</label>
+                                <label className="form-check-label small fw-medium">
+                                    Show Clients {showClients && !shouldShowClients && <span className="text-muted ms-1" style={{ fontSize: '10px' }}>(Zoom in to view)</span>}
+                                </label>
                             </div>
                             <div className="form-check form-switch mb-2">
                                 <input className="form-check-input" type="checkbox" role="switch" checked={showNodes} onChange={(e) => setShowNodes(e.target.checked)} />
@@ -1438,6 +1943,7 @@ export default function AdminDashboard({
                 preferCanvas={true}
                 keyboard={false}
             >
+                <MapViewportListener onBoundsChange={setVisibleBounds} onZoomChange={setMapZoom} />
                 {mapType === 'vector' ? (
                     <>
                         {isDarkMode ? (
@@ -1465,15 +1971,21 @@ export default function AdminDashboard({
                     />
                 )}
                 
-                {connections.map(line => (
+                {visibleConnections.map(line => (
                   <MemoizedPolyline 
                       key={`${line.id}-${line.color}`}
+                      id={line.id}
                       coordinates={line.coordinates}
                       color={line.color}
                       weight={line.weight}
                       dashArray={line.dashArray}
                       label={line.label}
-                      onClick={() => handleCableClick(line)}
+                      isPopupOpen={activePopup?.type === 'cable' && activePopup?.id === line.id}
+                      onClick={() => {
+                        handleCableClick(line);
+                        setActivePopup({ id: line.id, type: 'cable' });
+                      }}
+                      onPopupClose={() => setActivePopup(null)}
                   />
                 ))}
                 
@@ -1481,48 +1993,13 @@ export default function AdminDashboard({
 
                 {editingCable && (
                   <Polyline
+                    ref={cablePolylineRef}
                     positions={cableVertices}
                     pathOptions={{ color: '#ffb300', weight: 6, opacity: 0.9, dashArray: '5,10' }}
                   />
                 )}
 
-                {editingCable && cableVertices.map((vertex, idx) => {
-                  if (idx === 0 || idx === cableVertices.length - 1) return null;
-                  return (
-                    <Marker
-                      key={`vertex-${idx}`}
-                      position={vertex}
-                      draggable={true}
-                      icon={L.divIcon({
-                        className: 'custom-vertex-icon',
-                        html: `<div class="vertex-handle-inner">${idx}</div>`,
-                        iconSize: [24, 24],
-                        iconAnchor: [12, 12]
-                      })}
-                      eventHandlers={{
-                        dragend: (e) => {
-                          const newLatLng = e.target.getLatLng();
-                          setCableHistory(prev => [...prev, cableVertices]);
-                          const updated = [...cableVertices];
-                          updated[idx] = [newLatLng.lat, newLatLng.lng];
-                          setCableVertices(updated);
-                        },
-                        click: () => {
-                          showConfirm(
-                            "Apakah Anda yakin ingin menghapus titik belokan ini?",
-                            () => {
-                              setCableHistory(prev => [...prev, cableVertices]);
-                              const updated = [...cableVertices];
-                              updated.splice(idx, 1);
-                              setCableVertices(updated);
-                            },
-                            "Hapus Titik Belokan"
-                          );
-                        }
-                      }}
-                    />
-                  );
-                })}
+                {vertexMarkers}
 
                 {editingCable && <MapClickHandler onClick={handleMapClickForCable} />}
 
@@ -1643,10 +2120,10 @@ export default function AdminDashboard({
       </div>
 
       {/* Edit Modal */}
-      {editEntity && (
+      {editEntity && createPortal(
         <>
-            <div className="modal-backdrop fade show"></div>
-            <div className="modal fade show d-block" tabIndex="-1">
+            <div className="modal-backdrop fade show" style={{ zIndex: 100050 }}></div>
+            <div className="modal fade show d-block" tabIndex="-1" style={{ zIndex: 100055 }}>
                 <div className="modal-dialog modal-dialog-centered">
                     <div className="modal-content border-0 shadow-lg rounded-4">
                         <form onSubmit={handleEditSubmit}>
@@ -1656,21 +2133,33 @@ export default function AdminDashboard({
                             </div>
                             <div className="modal-body p-4">
                                 {editEntity.username && (
-                                <div className="mb-3">
-                                    <label className="form-label text-muted small fw-bold">No. WhatsApp</label>
-                                    <div className="input-group">
-                                        <span className="input-group-text bg-light text-muted border-end-0">+62</span>
-                                        <input 
-                                            className="form-control border-start-0 ps-0" 
-                                            placeholder="8123456789" 
-                                            value={editForm.whatsapp ? editForm.whatsapp.replace(/^\+?62/, '').replace(/^0/, '') : ''} 
-                                            onChange={e => {
-                                                const val = e.target.value.replace(/\D/g, '');
-                                                setEditForm({...editForm, whatsapp: val ? `+62${val}` : ''});
-                                            }}
+                                <>
+                                    <div className="mb-3">
+                                        <label className="form-label text-muted small fw-bold">No. WhatsApp</label>
+                                        <div className="input-group">
+                                            <span className="input-group-text bg-light text-muted border-end-0">+62</span>
+                                            <input 
+                                                className="form-control border-start-0 ps-0" 
+                                                placeholder="8123456789" 
+                                                value={editForm.whatsapp ? editForm.whatsapp.replace(/^\+?62/, '').replace(/^0/, '') : ''} 
+                                                onChange={e => {
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    setEditForm({...editForm, whatsapp: val ? `+62${val}` : ''});
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="mb-3">
+                                        <label className="form-label text-muted small fw-bold">Alamat Lengkap</label>
+                                        <textarea 
+                                            className="form-control" 
+                                            rows="2"
+                                            placeholder="Masukkan alamat lengkap client..." 
+                                            value={editForm.address || ''} 
+                                            onChange={e => setEditForm({...editForm, address: e.target.value})}
                                         />
                                     </div>
-                                </div>
+                                </>
                                 )}
 
                                 <div className="mb-3">
@@ -1738,11 +2227,12 @@ export default function AdminDashboard({
                     </div>
                 </div>
             </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Lightbox Modal */}
-      {lightbox.isOpen && (
+      {lightbox.isOpen && createPortal(
           <div 
               style={{
                   position: 'fixed',
@@ -1753,7 +2243,7 @@ export default function AdminDashboard({
                   backgroundColor: 'rgba(15, 23, 42, 0.95)',
                   backdropFilter: 'blur(8px)',
                   WebkitBackdropFilter: 'blur(8px)',
-                  zIndex: 9999,
+                  zIndex: 100060,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1866,12 +2356,13 @@ export default function AdminDashboard({
                       <i className="bi bi-chevron-right"></i>
                   </button>
               )}
-          </div>
+          </div>,
+          document.body
       )}
 
       {/* CUSTOM ALERT MODAL */}
-      {customAlert.show && (
-        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 9999 }}>
+      {customAlert.show && createPortal(
+        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 100070 }}>
           <div className="custom-modal-card p-4 rounded-4 shadow-lg bg-body text-body border" style={{ width: '400px', maxWidth: '90%', animation: 'scaleUp 0.15s ease-out' }}>
             <div className="d-flex align-items-center gap-2 mb-3">
               <i className={`bi ${customAlert.type === 'danger' ? 'bi-exclamation-triangle-fill text-danger' : 'bi-info-circle-fill text-primary'} fs-4`}></i>
@@ -1882,12 +2373,13 @@ export default function AdminDashboard({
               <button className="btn btn-primary px-4 fw-semibold" onClick={() => setCustomAlert(prev => ({ ...prev, show: false }))}>OK</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* CUSTOM CONFIRM MODAL */}
-      {customConfirm.show && (
-        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 9999 }}>
+      {customConfirm.show && createPortal(
+        <div className="custom-modal-backdrop d-flex align-items-center justify-content-center" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 100080 }}>
           <div className="custom-modal-card p-4 rounded-4 shadow-lg bg-body text-body border" style={{ width: '400px', maxWidth: '90%', animation: 'scaleUp 0.15s ease-out' }}>
             <div className="d-flex align-items-center gap-2 mb-3">
               <i className="bi bi-question-circle-fill text-warning fs-4"></i>
@@ -1899,7 +2391,8 @@ export default function AdminDashboard({
               <button className="btn btn-warning text-white px-3 fw-bold shadow-sm" onClick={customConfirm.onConfirm}>Ya, Lanjutkan</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

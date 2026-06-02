@@ -49,8 +49,15 @@ const StatCard = ({ icon, label, value, color = "primary" }) => (
 // ─────────────────────────────────────────────────────────────
 export default function PPPoEProfiles() {
   /* ───────── STATE ───────── */
+  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
   const [routers, setRouters] = useState([]);
-  const [selectedRouter, setSelectedRouter] = useState(null);
+  const [selectedRouter, setSelectedRouter] = useState(() => {
+     if (localStorage.getItem('lock_router') === 'true') {
+         const saved = localStorage.getItem('locked_router_id');
+         if (saved) return Number(saved);
+     }
+     return null;
+  });
   const [profiles, setProfiles] = useState([]);
   
   /* ───────── UI STATE ───────── */
@@ -70,7 +77,7 @@ export default function PPPoEProfiles() {
       const routerList = res.data?.data || res.data || [];
       setRouters(routerList);
       if (routerList.length > 0) {
-        setSelectedRouter(routerList[0].id);
+        setSelectedRouter(prev => prev || routerList[0].id);
       }
     } catch (err) {
       console.error("Failed to load routers:", err);
@@ -206,19 +213,44 @@ export default function PPPoEProfiles() {
               <label className="form-label small text-muted fw-semibold mb-1">
                 <i className="bi bi-router me-1"></i>Select Router
               </label>
-              <select
-                className="form-select form-select-sm"
-                value={selectedRouter || ""}
-                onChange={(e) => setSelectedRouter(Number(e.target.value))}
-                disabled={loadingRouters || routers.length === 0}
-              >
-                <option value="">-- Choose Router --</option>
-                {routers.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name} {r.host && <span className="text-muted">({r.host})</span>}
-                  </option>
-                ))}
-              </select>
+              <div className="input-group input-group-sm">
+                <select
+                  className="form-select"
+                  value={selectedRouter || ""}
+                  onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedRouter(val ? Number(val) : null);
+                      if (isRouterLocked && val) {
+                          localStorage.setItem('locked_router_id', val);
+                      }
+                  }}
+                  disabled={loadingRouters || routers.length === 0}
+                >
+                  <option value="">-- Choose Router --</option>
+                  {routers.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} {r.host && <span className="text-muted">({r.host})</span>}
+                    </option>
+                  ))}
+                </select>
+                <button 
+                    className={`btn btn-outline-secondary ${isRouterLocked ? 'text-primary' : 'text-muted'}`}
+                    type="button"
+                    onClick={() => {
+                        const newLocked = !isRouterLocked;
+                        setIsRouterLocked(newLocked);
+                        localStorage.setItem('lock_router', newLocked);
+                        if (newLocked && selectedRouter) {
+                            localStorage.setItem('locked_router_id', selectedRouter);
+                        } else {
+                            localStorage.removeItem('locked_router_id');
+                        }
+                    }}
+                    title={isRouterLocked ? "Buka kuncian router default" : "Kunci router ini sebagai default"}
+                >
+                    <i className={`bi ${isRouterLocked ? 'bi-lock-fill' : 'bi-unlock'}`}></i>
+                </button>
+              </div>
             </div>
 
             {/* Search */}

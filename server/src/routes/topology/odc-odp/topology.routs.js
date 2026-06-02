@@ -37,6 +37,7 @@ router.delete("/odp/:id", TopologyController.deleteOdp);
 
 router.get("/ports/available", TopologyController.getAvailablePorts);
 
+router.get("/search", TopologyController.searchTopology);
 router.get("/users/:routerId", TopologyController.getUsersByRouter);
 
 // =====================================================

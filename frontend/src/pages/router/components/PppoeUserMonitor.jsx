@@ -67,6 +67,11 @@ export const usePppoeUserMonitor = (selectedRouter) => {
   const socketRef = useRef(null);
   const isMountedRef = useRef(true);
 
+  // Reset users list when selectedRouter changes to prevent displaying stale users
+  useEffect(() => {
+    setUsers([]);
+  }, [selectedRouter]);
+
   /* ───────── LOAD USERS ───────── */
   const loadUsers = useCallback(async (routerId) => {
     if (!routerId) return null;
@@ -149,6 +154,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
     const handler = (msg) => {
       if (msg?.type !== "pppoe-realtime") return;
+      if (msg.routerId && Number(msg.routerId) !== Number(selectedRouter)) return;
       const data = msg?.data;
       if (!Array.isArray(data)) return;
 
@@ -189,6 +195,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
     return () => {
       socket.off("pppoe-realtime", handler);
+      socket.emit("leave-router", selectedRouter);
     };
   }, [selectedRouter]);
 

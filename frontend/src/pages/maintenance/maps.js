@@ -10,6 +10,9 @@ import {
   AttributionControl,
   LayersControl,
 } from "react-leaflet";
+import MarkerClusterGroup from 'react-leaflet-cluster';
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
 import L from "leaflet";
@@ -747,6 +750,25 @@ function FitMapBounds({ coordinates, selectedRouter }) {
   return null;
 }
 
+// Helper to listen to map viewport changes (bounds & zoom)
+function MapViewportListener({ onBoundsChange, onZoomChange }) {
+  const map = useMap();
+  useEffect(() => {
+    const handleMapChange = () => {
+      onBoundsChange(map.getBounds().pad(0.2));
+      onZoomChange(map.getZoom());
+    };
+    handleMapChange();
+    map.on("moveend", handleMapChange);
+    map.on("zoomend", handleMapChange);
+    return () => {
+      map.off("moveend", handleMapChange);
+      map.off("zoomend", handleMapChange);
+    };
+  }, [map, onBoundsChange, onZoomChange]);
+  return null;
+}
+
 // Custom Leaflet SVG renderer with optimized padding to prevent lines clipping during pan
 const customRenderer = L.svg({ padding: 1.5 });
 
@@ -860,15 +882,29 @@ function FilterBar({ searchQuery, setSearchQuery, statusFilter, setStatusFilter 
 // 🗺️ MAIN COMPONENT
 // =========================
 export default function NocPppoeMap() {
+  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
   const [routers, setRouters] = useState([]);
-  const [selectedRouter, setSelectedRouter] = useState(null);
+  const [selectedRouter, setSelectedRouter] = useState(() => {
+     if (localStorage.getItem('lock_router') === 'true') {
+         const saved = localStorage.getItem('locked_router_id');
+         if (saved) return Number(saved);
+     }
+     return null;
+  });
   const [router, setRouter] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [mapTheme, setMapTheme] = useState("osm");
+  const [mapTheme, setMapTheme] = useState(() => localStorage.getItem('locked_map_theme') || "osm");
+  
+  useEffect(() => {
+    localStorage.setItem('locked_map_theme', mapTheme);
+  }, [mapTheme]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [mapZoom, setMapZoom] = useState(8);
+  const [visibleBounds, setVisibleBounds] = useState(null);
+  const [activePopup, setActivePopup] = useState(null); // { type: 'router'|'user', id: any }
 
   // Load routers
   const loadRouters = async () => {
@@ -877,7 +913,7 @@ export default function NocPppoeMap() {
       const res = await api.get("/routers");
       setRouters(res.data);
       if (!selectedRouter && res.data.length > 0) {
-        setSelectedRouter(res.data[0].id);
+        setSelectedRouter(prev => prev || res.data[0].id);
       }
     } catch (err) {
       setError("Failed to load routers");
@@ -949,6 +985,22 @@ export default function NocPppoeMap() {
         return true;
       });
   }, [users, statusFilter, searchQuery]);
+
+  // Viewport bounds & zoom level filtering (LOD) for rendering
+  const visibleUsers = useMemo(() => {
+    if (mapZoom < 13) return [];
+    return filteredUsers;
+  }, [filteredUsers, mapZoom]);
+
+  const visibleLineUsers = useMemo(() => {
+    if (mapZoom < 17) return [];
+    return filteredUsers.filter((u) => {
+      if (!visibleBounds) return true;
+      const lat = Number(u.latitude);
+      const lng = Number(u.longitude);
+      return visibleBounds.contains([lat, lng]);
+    });
+  }, [filteredUsers, mapZoom, visibleBounds]);
 
   // Collect coordinates for fit bounds
   const allCoordinates = useMemo(() => {
@@ -1033,17 +1085,44 @@ export default function NocPppoeMap() {
         <div className="noc-header">
           <h4>🗺️ PPPoE Network Map</h4>
           <div className="header-actions">
-            <select
-              className="router-select"
-              value={selectedRouter || ""}
-              onChange={(e) => setSelectedRouter(Number(e.target.value))}
-            >
-              {routers.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} • {r.host}
-                </option>
-              ))}
-            </select>
+            <div className="input-group input-group-sm" style={{ width: 'auto' }}>
+              <select
+                className="router-select form-select form-select-sm"
+                value={selectedRouter || ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedRouter(val ? Number(val) : null);
+                  if (isRouterLocked && val) {
+                      localStorage.setItem('locked_router_id', val);
+                  }
+                }}
+                style={{ margin: 0, borderRadius: '4px 0 0 4px', borderRight: 'none' }}
+              >
+                {routers.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} • {r.host}
+                  </option>
+                ))}
+              </select>
+              <button 
+                  className={`btn btn-outline-secondary ${isRouterLocked ? 'text-primary' : 'text-muted'}`}
+                  type="button"
+                  onClick={() => {
+                      const newLocked = !isRouterLocked;
+                      setIsRouterLocked(newLocked);
+                      localStorage.setItem('lock_router', newLocked);
+                      if (newLocked && selectedRouter) {
+                          localStorage.setItem('locked_router_id', selectedRouter);
+                      } else {
+                          localStorage.removeItem('locked_router_id');
+                      }
+                  }}
+                  title={isRouterLocked ? "Buka kuncian router default" : "Kunci router ini sebagai default"}
+                  style={{ borderRadius: '0 4px 4px 0', border: '1px solid #ccc', background: '#fff' }}
+              >
+                  <i className={`bi ${isRouterLocked ? 'bi-lock-fill' : 'bi-unlock'}`}></i>
+              </button>
+            </div>
             <button
               className="refresh-btn"
               onClick={() => selectedRouter && loadRouterData(selectedRouter)}
@@ -1078,10 +1157,10 @@ export default function NocPppoeMap() {
             center={[-7.1506, 110.1403]}
             zoom={8}
             className="noc-leaflet-map"
-            preferCanvas={false}
-            renderer={customRenderer}
+            preferCanvas={true}
             keyboard={false}
           >
+            <MapViewportListener onBoundsChange={setVisibleBounds} onZoomChange={setMapZoom} />
             <MapAutoFocus target={router} />
             <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
             <ScaleControl position="bottomleft" metric />
@@ -1126,81 +1205,90 @@ export default function NocPppoeMap() {
                 position={[router.latitude, router.longitude]}
                 icon={createRouterIcon(router.isOnline !== false)}
                 zIndexOffset={1000}
+                eventHandlers={{ click: () => setActivePopup({ type: 'router', id: router.id }) }}
               >
-                <Popup className="noc-popup" autoPan={false}>
-                  <div className="popup-header">
-                    <strong>🖥️ {router.name}</strong>
-                    <span className={`status-badge ${router.isOnline !== false ? "" : "offline"}`}>
-                      {router.isOnline !== false ? "🟢 Online" : "🔴 Offline"}
-                    </span>
-                  </div>
-                  <div className="popup-body">
-                    <div className="info-row">
-                      <label>Host:</label>
-                      <span className="mono">{router.host}</span>
+                <Popup className="noc-popup" autoPan={false} eventHandlers={{ remove: () => setActivePopup(null) }}>
+                  <>
+                    <div className="popup-header">
+                      <strong>🖥️ {router.name}</strong>
+                      <span className={`status-badge ${router.isOnline !== false ? "" : "offline"}`}>
+                        {router.isOnline !== false ? "🟢 Online" : "🔴 Offline"}
+                      </span>
                     </div>
-                  </div>
+                    <div className="popup-body">
+                      <div className="info-row">
+                        <label>Host:</label>
+                        <span className="mono">{router.host}</span>
+                      </div>
+                    </div>
+                  </>
                 </Popup>
               </Marker>
             )}
 
             {/* Users */}
-            {filteredUsers.map((u) => (
-              <Marker
-                key={u.id || u.username}
-                position={[u.latitude, u.longitude]}
-                icon={createUserIcon(u.isOnline)}
-                options={{ userData: u }}
-              >
-                <Popup className="noc-popup" minWidth={280} autoPan={false}>
-                  <div className="popup-header">
-                    <strong>👤 {u.username}</strong>
-                    <span className={`status-badge ${u.isOnline ? "" : "offline"}`}>
-                      {u.isOnline ? "🟢 Online" : "🔴 Offline"}
-                    </span>
-                  </div>
-                  <div className="popup-body">
-                    <div className="info-row">
-                      <label>Profile:</label>
-                      <span>{u.profile || "-"}</span>
-                    </div>
-                    <div className="info-row">
-                      <label>Client IP:</label>
-                      <span className="mono">{u.remoteAddress || "No session"}</span>
-                    </div>
-                    {u.localAddress && (
-                      <div className="info-row">
-                        <label>Router IP:</label>
-                        <span className="mono">{u.localAddress}</span>
+            {visibleUsers.map((u) => {
+              const uId = u.id || u.username;
+              return (
+                <Marker
+                  key={uId}
+                  position={[u.latitude, u.longitude]}
+                  icon={createUserIcon(u.isOnline)}
+                  options={{ userData: u }}
+                  eventHandlers={{ click: () => setActivePopup({ type: 'user', id: uId }) }}
+                >
+                  <Popup className="noc-popup" minWidth={280} autoPan={false} eventHandlers={{ remove: () => setActivePopup(null) }}>
+                    <>
+                      <div className="popup-header">
+                        <strong>👤 {u.username}</strong>
+                        <span className={`status-badge ${u.isOnline ? "" : "offline"}`}>
+                          {u.isOnline ? "🟢 Online" : "🔴 Offline"}
+                        </span>
                       </div>
-                    )}
-                    {u.uptime && (
-                      <div className="info-row">
-                        <label>Uptime:</label>
-                        <span>{u.uptime}</span>
+                      <div className="popup-body">
+                        <div className="info-row">
+                          <label>Profile:</label>
+                          <span>{u.profile || "-"}</span>
+                        </div>
+                        <div className="info-row">
+                          <label>Client IP:</label>
+                          <span className="mono">{u.remoteAddress || "No session"}</span>
+                        </div>
+                        {u.localAddress && (
+                          <div className="info-row">
+                            <label>Router IP:</label>
+                            <span className="mono">{u.localAddress}</span>
+                          </div>
+                        )}
+                        {u.uptime && (
+                          <div className="info-row">
+                            <label>Uptime:</label>
+                            <span>{u.uptime}</span>
+                          </div>
+                        )}
+                        <hr />
+                        <div className="traffic-stats">
+                          <div className="traffic-item">
+                            <i style={{ color: "var(--noc-success)" }}>↓</i>
+                            <span>{(u.rxMbps || 0).toFixed(2)} Mbps</span>
+                          </div>
+                          <div className="traffic-item">
+                            <i style={{ color: "var(--noc-primary)" }}>↑</i>
+                            <span>{(u.txMbps || 0).toFixed(2)} Mbps</span>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    <hr />
-                    <div className="traffic-stats">
-                      <div className="traffic-item">
-                        <i style={{ color: "var(--noc-success)" }}>↓</i>
-                        <span>{(u.rxMbps || 0).toFixed(2)} Mbps</span>
+                      <div className="popup-footer">
+                        Updated: {new Date().toLocaleTimeString()}
                       </div>
-                      <div className="traffic-item">
-                        <i style={{ color: "var(--noc-primary)" }}>↑</i>
-                        <span>{(u.txMbps || 0).toFixed(2)} Mbps</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="popup-footer">
-                    Updated: {new Date().toLocaleTimeString()}
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
+                    </>
+                  </Popup>
+                </Marker>
+              );
+            })}
 
             {/* Connection Lines */}
-            {router?.latitude && router?.longitude && filteredUsers.map((u) => (
+            {mapZoom >= 17 && router?.latitude && router?.longitude && visibleLineUsers.map((u) => (
               <MemoizedUserPolyline
                 key={`line-${u.id || u.username}-${u.isOnline ? 'on' : 'off'}`}
                 routerLat={router.latitude}

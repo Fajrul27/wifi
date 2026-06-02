@@ -861,6 +861,7 @@ class PppoeService {
               longitude: true,
               roadCoordinates: true,
               whatsapp: true,
+              address: true,
               photoUrl: true,
               photoUrl2: true,
               photoUrl3: true,
@@ -1013,23 +1014,20 @@ class PppoeService {
         logDebug("updateRealtime: batch updating " + dbUpdates.length + " users in DB");
         const LogService = require("../../services/admin/LogService");
 
-        // Fire-and-forget DB update transaction to prevent blocking the tick
-        prisma.$transaction(
-          dbUpdates.map((u) => {
-            const lastKnown = this.knownOnlineStatus.get(u.id);
-            if (lastKnown === undefined || lastKnown !== u.isOnline) {
-              this.knownOnlineStatus.set(u.id, u.isOnline);
-              LogService.addLog(
-                `Client ${u.username} is now ${u.isOnline ? "Online" : "Offline"}`,
-                u.isOnline ? "success" : "danger"
-              ).catch(() => {});
-            }
+        const limit = pLimit(5); // Concurrency limit of 5 to avoid pool exhaustion
 
-            if (usersCache[this.router.id]) {
-              usersCache[this.router.id].set(u.id, u);
-            }
+        const updatePromises = dbUpdates.map((u) => {
+          const lastKnown = this.knownOnlineStatus.get(u.id);
+          if (lastKnown === undefined || lastKnown !== u.isOnline) {
+            this.knownOnlineStatus.set(u.id, u.isOnline);
+            LogService.addLog(
+              `Client ${u.username} is now ${u.isOnline ? "Online" : "Offline"}`,
+              u.isOnline ? "success" : "danger"
+            ).catch(() => {});
+          }
 
-            return prisma.pppoeUser.update({
+          return limit(() =>
+            prisma.pppoeUser.update({
               where: { id: u.id },
               data: {
                 isOnline: u.isOnline,
@@ -1037,9 +1035,11 @@ class PppoeService {
                 remoteAddress: u.remoteAddress,
                 lastSeen: u.lastSeen,
               },
-            });
-          })
-        ).catch(err => {
+            })
+          );
+        });
+
+        Promise.all(updatePromises).catch(err => {
           console.error("[PPPoE Batch DB Error]", err.message);
         });
       }

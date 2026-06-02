@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import api from "../../../services/api";
 import { getLimitByRange } from "../utils";
 
@@ -44,6 +44,7 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
   const wsRef = useRef(null);
 
   const [socketConnected, setSocketConnected] = useState(false);
+  const [isRouterConnected, setIsRouterConnected] = useState(false);
   const [routers, setRouters] = useState([]);
 
   const [metrics, setMetrics] = useState({
@@ -55,13 +56,39 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
     latest: { cpu: 0, ram: 0, rx: 0, tx: 0 },
   });
 
+  // Reset metrics when selectedRouter changes to prevent displaying stale metrics of the previous router
+  useEffect(() => {
+    setMetrics({
+      labels: [],
+      cpuData: [],
+      ramData: [],
+      rxData: [],
+      txData: [],
+      latest: { cpu: 0, ram: 0, rx: 0, tx: 0 },
+    });
+  }, [selectedRouter]);
+
+  // Sync initial isRouterConnected state from routers array when selectedRouter changes
+  useEffect(() => {
+    if (selectedRouter && routers.length > 0) {
+      const activeRouter = routers.find((r) => Number(r.id) === Number(selectedRouter));
+      if (activeRouter) {
+        setIsRouterConnected(!!activeRouter.isOnline);
+      } else {
+        setIsRouterConnected(false);
+      }
+    } else {
+      setIsRouterConnected(false);
+    }
+  }, [selectedRouter, routers]);
+
   /* ───────────── LOAD ROUTERS ───────────── */
-  const loadRouters = async () => {
+  const loadRouters = useCallback(async () => {
     const res = await api.get("/routers");
     const data = res.data?.data || res.data || [];
     setRouters(data);
     return data;
-  };
+  }, []);
 
   /* ───────────── WEBSOCKET REALTIME ───────────── */
   useEffect(() => {
@@ -88,45 +115,50 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
           const msg = JSON.parse(event.data);
 
           if (Number(msg.routerId) !== Number(selectedRouter)) return;
-          if (msg.type !== "router-realtime") return;
 
-          const s = msg.data?.system || {};
-          const t = msg.data?.traffic || {};
+          if (msg.type === "router-realtime") {
+            setIsRouterConnected(true);
 
-          const time = new Date().toLocaleTimeString();
+            const s = msg.data?.system || {};
+            const t = msg.data?.traffic || {};
 
-          /* ───────────── FIXED RX/TX ───────────── */
-          const rx = normalizeTraffic(
-            t.rxRaw ?? t.rx ?? t.rxBps ?? 0
-          );
+            const time = new Date().toLocaleTimeString();
 
-          const tx = normalizeTraffic(
-            t.txRaw ?? t.tx ?? t.txBps ?? 0
-          );
+            /* ───────────── FIXED RX/TX ───────────── */
+            const rx = normalizeTraffic(
+              t.rxRaw ?? t.rx ?? t.rxBps ?? 0
+            );
 
-          const cpu = toNumber(s.cpuLoad);
+            const tx = normalizeTraffic(
+              t.txRaw ?? t.tx ?? t.txBps ?? 0
+            );
 
-          /* ───────────── RAM FIXED ───────────── */
-          const ram =
-            s.totalMemory && s.freeMemory
-              ? ((s.totalMemory - s.freeMemory) / s.totalMemory) * 100
-              : toNumber(s.ramUsage ?? s.ram ?? 0);
+            const cpu = toNumber(s.cpuLoad);
 
-          const limit = getLimitByRange(timeRange || "1h");
+            /* ───────────── RAM FIXED ───────────── */
+            const ram =
+              s.totalMemory && s.freeMemory
+                ? ((s.totalMemory - s.freeMemory) / s.totalMemory) * 100
+                : toNumber(s.ramUsage ?? s.ram ?? 0);
 
-          setMetrics((prev) => ({
-            labels: [...prev.labels, time].slice(-limit),
-            cpuData: [...prev.cpuData, cpu].slice(-limit),
-            ramData: [...prev.ramData, ram].slice(-limit),
-            rxData: [...prev.rxData, rx].slice(-limit),
-            txData: [...prev.txData, tx].slice(-limit),
-            latest: {
-              cpu,
-              ram,
-              rx,
-              tx,
-            },
-          }));
+            const limit = getLimitByRange(timeRange || "1h");
+
+            setMetrics((prev) => ({
+              labels: [...prev.labels, time].slice(-limit),
+              cpuData: [...prev.cpuData, cpu].slice(-limit),
+              ramData: [...prev.ramData, ram].slice(-limit),
+              rxData: [...prev.rxData, rx].slice(-limit),
+              txData: [...prev.txData, tx].slice(-limit),
+              latest: {
+                cpu,
+                ram,
+                rx,
+                tx,
+              },
+            }));
+          } else if (msg.type === "router-status") {
+            setIsRouterConnected(!!msg.data?.isOnline);
+          }
         } catch (e) {
           console.error("WS ERROR:", e);
         }
@@ -146,5 +178,6 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
     loadRouters,
     metrics,
     socketConnected,
+    isRouterConnected,
   };
 };

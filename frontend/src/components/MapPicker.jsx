@@ -56,12 +56,37 @@ function ClickHandler({ onPick }) {
   return null;
 }
 
-function InvalidateOnMount() {
+function InvalidateOnMount({ lat, lng }) {
   const map = useMap();
+  
+  // Handle continuous smooth resizing (e.g. during modal animation)
   useEffect(() => {
-    const t = setTimeout(() => map.invalidateSize(), 150);
-    return () => clearTimeout(t);
+    let animationFrameId;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+    });
+
+    const container = map.getContainer();
+    if (container) observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(animationFrameId);
+    };
   }, [map]);
+
+  // Handle initial center on mount or when coordinates change
+  useEffect(() => {
+    if (lat && lng) {
+      map.setView([lat, lng], 16, { animate: false });
+    } else {
+      map.setView([-7.5, 110.0], 7, { animate: false });
+    }
+  }, [map, lat, lng]);
+
   return null;
 }
 
@@ -87,9 +112,20 @@ function FlyToPin({ lat, lng }) {
  *   height             — tinggi peta css (default 300)
  */
 export default function MapPicker({ lat, lng, onChange, height = 300 }) {
+  const [isDarkMode, setIsDarkMode] = useState(document.documentElement.classList.contains("dark-mode"));
+  
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark-mode"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   const [pasteInput, setPasteInput] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [otherDevices, setOtherDevices] = useState([]);
+  const [mapType, setMapType] = useState('satellite');
 
   useEffect(() => {
     const fetchOtherDevices = async () => {
@@ -161,8 +197,8 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
   const hasPin = lat !== "" && lng !== "" && !isNaN(Number(lat)) && !isNaN(Number(lng));
   const numLat = hasPin ? Number(lat) : null;
   const numLng = hasPin ? Number(lng) : null;
-  const center = hasPin ? [numLat, numLng] : [-2.5, 118.0];
-  const initZoom = hasPin ? 16 : 5;
+  const center = hasPin ? [numLat, numLng] : [-7.5, 110.0];
+  const initZoom = hasPin ? 16 : 7;
 
   const displayOtherDevices = otherDevices.filter(dev => {
     if (hasPin) {
@@ -204,7 +240,7 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
           Tempel koordinat dari Google Maps
         </label>
         <div className="input-group input-group-sm">
-          <span className="input-group-text bg-white">
+          <span className="input-group-text bg-body">
             <i className="bi bi-geo-alt text-danger"></i>
           </span>
           <input
@@ -249,7 +285,7 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
         position: "relative",
         borderRadius: 10,
         overflow: "hidden",
-        border: "2px solid #dee2e6",
+        border: "2px solid var(--bs-border-color)",
         boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
       }}>
         {/* Badge instruksi */}
@@ -267,9 +303,9 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
         {hasPin && (
           <div style={{
             position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)",
-            zIndex: 1000, background: "rgba(255,255,255,0.93)",
+            zIndex: 1000, background: "var(--bs-body-bg)", color: "var(--bs-body-color)",
             padding: "4px 14px", borderRadius: 20, fontSize: 12,
-            boxShadow: "0 1px 6px rgba(0,0,0,0.18)", whiteSpace: "nowrap",
+            boxShadow: "0 1px 6px rgba(0,0,0,0.18)", whiteSpace: "nowrap", border: "1px solid var(--bs-border-color)"
           }}>
             <i className="bi bi-geo-alt-fill text-danger me-1"></i>
             {numLat.toFixed(6)}, {numLng.toFixed(6)}
@@ -286,6 +322,31 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
           </div>
         )}
 
+        {/* Map Type Toggle */}
+        <div style={{
+          position: "absolute", top: 10, right: 10,
+          zIndex: 1000,
+          background: "var(--bs-body-bg)",
+          borderRadius: 4,
+          boxShadow: "0 1px 5px rgba(0,0,0,0.4)",
+          overflow: "hidden",
+          display: "flex",
+          border: "1px solid var(--bs-border-color)"
+        }}>
+           <button 
+             type="button"
+             className={`btn btn-sm ${mapType === 'satellite' ? 'btn-primary' : 'btn-link text-body'}`}
+             style={{ borderRadius: 0, textDecoration: 'none', fontWeight: '500', fontSize: '11px', padding: '4px 8px' }}
+             onClick={(e) => { e.preventDefault(); setMapType('satellite'); }}
+           >Satellite</button>
+           <button 
+             type="button"
+             className={`btn btn-sm ${mapType === 'vector' ? 'btn-primary' : 'btn-link text-body'}`}
+             style={{ borderRadius: 0, textDecoration: 'none', fontWeight: '500', fontSize: '11px', padding: '4px 8px' }}
+             onClick={(e) => { e.preventDefault(); setMapType('vector'); }}
+           >Vector</button>
+        </div>
+
         <MapContainer
           center={center}
           zoom={initZoom}
@@ -295,11 +356,26 @@ export default function MapPicker({ lat, lng, onChange, height = 300 }) {
           scrollWheelZoom={true}
           keyboard={false}
         >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution="&copy; OpenStreetMap contributors"
-          />
-          <InvalidateOnMount />
+          {mapType === 'satellite' ? (
+            <TileLayer
+              url="http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+              maxZoom={20}
+              subdomains={['mt0','mt1','mt2','mt3']}
+            />
+          ) : isDarkMode ? (
+            <TileLayer
+              key="dark-tile"
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            />
+          ) : (
+            <TileLayer
+              key="light-tile"
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            />
+          )}
+          <InvalidateOnMount lat={numLat} lng={numLng} />
           <ClickHandler onPick={onChange} />
           {hasPin && (
             <>

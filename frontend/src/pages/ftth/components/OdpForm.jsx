@@ -81,7 +81,9 @@ export default function OdpForm({
           latitude: formData.latitude !== "" ? parseFloat(formData.latitude) : null,
           longitude: formData.longitude !== "" ? parseFloat(formData.longitude) : null,
         };
-        await api.put(`/topology/odp/${editingOdp.id}`, payload);
+        const rawOdpId = editingOdp.id;
+        const realId = rawOdpId >= 100000 ? rawOdpId - 100000 : rawOdpId;
+        await api.put(`/topology/odp/${realId}`, payload);
       } else {
         // CREATE MODE → POST
         const payload = {

@@ -24,6 +24,14 @@ function initSocket(server) {
       console.log("📡 Joined room:", room);
     });
 
+    socket.on("leave-router", (routerId) => {
+      const room = `router:${String(routerId)}`;
+
+      socket.leave(room);
+
+      console.log("📡 Left room:", room);
+    });
+
     socket.on("disconnect", () => {
       console.log("🔴 Client disconnected:", socket.id);
     });

@@ -175,7 +175,14 @@ const PaginationControls = ({ currentPage, totalPages, totalItems, itemsPerPage,
 // ─────────────────────────────────────────────────────────────
 export default function PppoeDashboard() {
   /* ───────────────── STATE ───────────────── */
-  const [selectedRouter, setSelectedRouter] = useState(null);
+  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
+  const [selectedRouter, setSelectedRouter] = useState(() => {
+     if (localStorage.getItem('lock_router') === 'true') {
+         const saved = localStorage.getItem('locked_router_id');
+         if (saved) return Number(saved);
+     }
+     return null;
+  });
   const [routers, setRouters] = useState([]);
 
   /* ───────────────── PAGINATION STATE ───────────────── */
@@ -212,7 +219,7 @@ export default function PppoeDashboard() {
   const [confirmDelete, setConfirmDelete] = useState({ show: false, user: null });
 
   /* ───────────────── ROUTER MONITOR ───────────────── */
-  const { loadRouters, metrics, socketConnected } = useRouterMonitor(selectedRouter);
+  const { loadRouters, metrics, socketConnected, isRouterConnected } = useRouterMonitor(selectedRouter);
 
   /* ───────────────── REFS ───────────────── */
   const isMountedRef = useRef(true);
@@ -248,7 +255,7 @@ export default function PppoeDashboard() {
       const data = await loadRouters();
       if (!isMountedRef.current) return;
       setRouters(data || []);
-      if (data?.length > 0) setSelectedRouter(data[0].id);
+      if (data?.length > 0) setSelectedRouter(prev => prev || data[0].id);
     };
     init();
     return () => { isMountedRef.current = false; };
@@ -467,7 +474,7 @@ export default function PppoeDashboard() {
             <p className="text-muted mb-0 small">Monitor & manage user connections</p>
           </div>
           <div className="d-flex align-items-center gap-2">
-            <ConnectionBadge connected={socketConnected} />
+            <ConnectionBadge connected={socketConnected && isRouterConnected} />
             <button
               className="btn btn-primary btn-sm d-flex align-items-center gap-2 btn-hover-scale"
               onClick={() => setShowAddModal(true)}
@@ -491,17 +498,42 @@ export default function PppoeDashboard() {
             <div className="row g-2 align-items-end">
               <div className="col-md-3">
                 <label className="form-label small text-muted fw-semibold mb-1">Router</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={selectedRouter || ""}
-                  onChange={(e) => setSelectedRouter(Number(e.target.value))}
-                >
-                  {routers.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} {r.host ? `(${r.host})` : ""}
-                    </option>
-                  ))}
-                </select>
+                <div className="input-group input-group-sm">
+                  <select
+                    className="form-select"
+                    value={selectedRouter || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedRouter(val ? Number(val) : null);
+                      if (isRouterLocked && val) {
+                          localStorage.setItem('locked_router_id', val);
+                      }
+                    }}
+                  >
+                    {routers.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} {r.host ? `(${r.host})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button 
+                      className={`btn btn-outline-secondary ${isRouterLocked ? 'text-primary' : 'text-muted'}`}
+                      type="button"
+                      onClick={() => {
+                          const newLocked = !isRouterLocked;
+                          setIsRouterLocked(newLocked);
+                          localStorage.setItem('lock_router', newLocked);
+                          if (newLocked && selectedRouter) {
+                              localStorage.setItem('locked_router_id', selectedRouter);
+                          } else {
+                              localStorage.removeItem('locked_router_id');
+                          }
+                      }}
+                      title={isRouterLocked ? "Buka kuncian router default" : "Kunci router ini sebagai default"}
+                  >
+                      <i className={`bi ${isRouterLocked ? 'bi-lock-fill' : 'bi-unlock'}`}></i>
+                  </button>
+                </div>
               </div>
               <div className="col-md-3">
                 <label className="form-label small text-muted fw-semibold mb-1">Search</label>

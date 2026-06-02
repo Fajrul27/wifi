@@ -227,8 +227,6 @@ controller.getUsers =
         });
       }
 
-      await service.connect();
-
       const users =
         await prisma.pppoeUser.findMany(
           {
@@ -245,8 +243,33 @@ controller.getUsers =
           }
         );
 
-      const activeUsers =
-        await service.getActiveUsers();
+      let activeUsers = [];
+      let secretMap = {};
+      let trafficMap = {};
+
+      try {
+        await service.connect();
+
+        activeUsers = await service.getActiveUsers();
+
+        // Fetch secrets to get disabled status
+        const secrets = await service.getUsers();
+        for (const s of secrets || []) {
+          secretMap[normalizeKey(s.name)] = s;
+        }
+
+        const activeInterfaces = [];
+        for (const a of activeUsers) {
+          const iface = a.interface || `<pppoe-${a.name}>`;
+          if (iface) {
+            activeInterfaces.push(iface);
+          }
+        }
+
+        trafficMap = await service.getMultipleInterfacesTraffic(activeInterfaces);
+      } catch (connErr) {
+        console.warn(`[Router Offline] Could not connect to Mikrotik router ID ${routerId}:`, connErr.message);
+      }
 
       const activeMap = {};
 
@@ -257,23 +280,6 @@ controller.getUsers =
           )
         ] = a;
       }
-
-      // Fetch secrets to get disabled status
-      const secrets = await service.getUsers();
-      const secretMap = {};
-      for (const s of secrets || []) {
-        secretMap[normalizeKey(s.name)] = s;
-      }
-
-      const activeInterfaces = [];
-      for (const a of activeUsers) {
-        const iface = a.interface || `<pppoe-${a.name}>`;
-        if (iface) {
-          activeInterfaces.push(iface);
-        }
-      }
-
-      const trafficMap = await service.getMultipleInterfacesTraffic(activeInterfaces);
 
       const result = [];
 
@@ -361,6 +367,7 @@ controller.getUsers =
             null,
 
           whatsapp: u.whatsapp || null,
+          address: u.address || null,
           photoUrl: u.photoUrl || null,
           photoUrl2: u.photoUrl2 || null,
           photoUrl3: u.photoUrl3 || null,
