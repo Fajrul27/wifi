@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import api from "../../../services/api";
 
+const globalOdcTreeCache = {};
+const globalOdcTreeLoading = {};
+
 // ─────────────────────────────────────────────────────────────
 // UTIL
 // ─────────────────────────────────────────────────────────────
@@ -441,22 +444,48 @@ export default function PortItem({
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = propExpanded !== undefined ? propExpanded : localExpanded;
   const setExpanded = propOnToggle !== undefined ? propOnToggle : setLocalExpanded;
-  const [odcTree, setOdcTree] = useState([]);
-  const [loadingTree, setLoadingTree] = useState(false);
+  const [odcTree, setOdcTree] = useState(() => globalOdcTreeCache[port?.id] || []);
+  const [loadingTree, setLoadingTree] = useState(() => port?.id && globalOdcTreeLoading[port.id]);
 
   const isUsed = port?.isUsed === true || (port?._count?.odcs ?? 0) > 0;
 
-  const fetchTree = useCallback(async () => {
+  const fetchTree = useCallback(async (force = false) => {
     if (!port?.id) return;
+    
+    // Don't refetch if we already have it in cache unless forced (refresh)
+    if (!force && globalOdcTreeCache[port.id]) {
+      setOdcTree(globalOdcTreeCache[port.id]);
+      return;
+    }
+    
     setLoadingTree(true);
+    globalOdcTreeLoading[port.id] = true;
+
+    // Stagger the initial load based on port index to prevent backend timeout (API storm)
+    if (!force) {
+      await new Promise(resolve => setTimeout(resolve, (port.index % 50) * 150));
+      // Check cache again in case another instance loaded it
+      if (globalOdcTreeCache[port.id]) {
+        setOdcTree(globalOdcTreeCache[port.id]);
+        setLoadingTree(false);
+        globalOdcTreeLoading[port.id] = false;
+        return;
+      }
+    }
+
     try {
       const res = await api.get(`/topology/odc/tree/${port.id}`);
-      setOdcTree(res.data?.data ?? []);
+      const data = res.data?.data ?? [];
+      setOdcTree(data);
+      globalOdcTreeCache[port.id] = data;
     } catch (err) {
       console.error("Gagal load ODC tree:", err.response?.data || err);
-      setOdcTree([]);
-    } finally { setLoadingTree(false); }
-  }, [port?.id]);
+      if (!globalOdcTreeCache[port.id]) setOdcTree([]);
+    } finally { 
+      setLoadingTree(false); 
+      globalOdcTreeLoading[port.id] = false;
+    }
+  }, [port?.id, port?.index]);
 
   // Auto-expand jika port terpakai
   useEffect(() => {
@@ -512,7 +541,7 @@ export default function PortItem({
           </button>
           {/* Refresh */}
           {expanded && (
-            <button className="btn btn-sm btn-outline-secondary" onClick={fetchTree}
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => fetchTree(true)}
               disabled={loadingTree} title="Refresh tree">
               <i className={`bi bi-arrow-clockwise${loadingTree ? " spin-anim" : ""}`} />
             </button>
@@ -545,9 +574,9 @@ export default function PortItem({
                 key={odc.id} odc={odc} level={0}
                 onAddChildOdc={onCreateChildOdc}
                 onAddOdp={onCreateOdp}
-                onDeleteOdc={(o) => onDeleteOdc?.(o, fetchTree)}
-                onDeleteOdp={(o) => onDeleteOdp?.(o, fetchTree)}
-                onEditOdc={(o) => onEditOdc?.(o, fetchTree)}
+                onDeleteOdc={(o) => onDeleteOdc?.(o, () => fetchTree(true))}
+                onDeleteOdp={(o) => onDeleteOdp?.(o, () => fetchTree(true))}
+                onEditOdc={(o) => onEditOdc?.(o, () => fetchTree(true))}
                 onEditOdp={(o) => onEditOdp?.(o, fetchTree)}
                 childOdcMap={childOdcMap}
                 routerId={olt?.routerId}
