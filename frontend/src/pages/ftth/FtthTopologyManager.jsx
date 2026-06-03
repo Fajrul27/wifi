@@ -24,9 +24,10 @@ const generateNextPort = (existingPorts) => {
   return indexes.length + 1;
 };
 
-const CACHE_KEY = "olts_by_router";
-const CACHE_TIMESTAMP_KEY = "olts_ts";
-const CACHE_TTL = 5 * 60 * 1000;
+/* ───────────────── GLOBAL CACHE ───────────────── */
+// Persist data across page navigation without sessionStorage
+let globalRoutersCache = [];
+let globalOltsCache = {};
 
 // ─────────────────────────────────────────────────────────────
 // REUSABLE COMPONENTS
@@ -336,8 +337,8 @@ const OltModal = ({ show, onClose, onSubmit, initialData, routers, mode = "creat
 export default function OltManagement() {
   /* ───────────────── STATE ───────────────── */
   const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
-  const [routers, setRouters] = useState([]);
-  const [oltsByRouter, setOltsByRouter] = useState({});
+  const [routers, setRouters] = useState(() => globalRoutersCache);
+  const [oltsByRouter, setOltsByRouter] = useState(() => globalOltsCache);
   const [selectedRouter, setSelectedRouter] = useState(() => {
      if (localStorage.getItem('lock_router') === 'true') {
          const saved = localStorage.getItem('locked_router_id');
@@ -353,7 +354,7 @@ export default function OltManagement() {
   const [expandedPorts, setExpandedPorts] = useState({});
 
   /* ───────────────── UI STATE ───────────────── */
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!globalRoutersCache.length);
   const [actionLoading, setActionLoading] = useState({});
   const [portLoading, setPortLoading] = useState({});
   
@@ -410,10 +411,11 @@ export default function OltManagement() {
     isMountedRef.current = true;
     
     const init = async () => {
-      setLoading(true);
+      if (!globalRoutersCache.length) setLoading(true);
       try {
         const routersData = await loadRouters();
         if (!isMountedRef.current) return;
+        globalRoutersCache = routersData;
         setRouters(routersData);
         
         if (routersData.length > 0 && !selectedRouter) {
@@ -505,15 +507,9 @@ export default function OltManagement() {
     setExpandedPorts({});
   };
 
-  /* ───────────────── LOAD OLTs FOR SELECTED ROUTER ───────────────── */
   const loadRouterOlts = useCallback(async (routerId) => {
     if (!routerId) return;
-    setLoading(true);
-    // Clear stale cache so fresh data is always shown after mutations
-    try {
-      sessionStorage.removeItem(CACHE_KEY);
-      sessionStorage.removeItem(CACHE_TIMESTAMP_KEY);
-    } catch (_) {}
+    if (!globalOltsCache[routerId]) setLoading(true);
     
     try {
       const olts = await loadOltsByRouter(routerId);
@@ -524,6 +520,7 @@ export default function OltManagement() {
         })
       );
       
+      globalOltsCache[routerId] = oltsWithPorts;
       if (isMountedRef.current) {
         setOltsByRouter(prev => ({ ...prev, [routerId]: oltsWithPorts }));
       }
