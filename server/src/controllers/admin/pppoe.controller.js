@@ -692,6 +692,10 @@ controller.updateUser = async (req, res) => {
     // Update in MikroTik
     const params = [`=.id=${secret[".id"]}`];
     
+    if (req.body.name !== undefined && req.body.name.trim() !== "") {
+      params.push(`=name=${req.body.name.trim()}`);
+    }
+    
     if (req.body.password !== undefined) params.push(`=password=${req.body.password}`);
     if (req.body.profile !== undefined) params.push(`=profile=${req.body.profile}`);
     if (req.body.comment !== undefined) params.push(`=comment=${req.body.comment}`);
@@ -732,6 +736,7 @@ controller.updateUser = async (req, res) => {
 
     // Terminate session if changed
     if (
+      req.body.name !== undefined ||
       req.body.profile !== undefined ||
       req.body["remote-address"] !== undefined ||
       req.body["local-address"] !== undefined ||
@@ -748,6 +753,7 @@ controller.updateUser = async (req, res) => {
 
     // Update in database cache
     const dbUpdateData = {};
+    if (req.body.name !== undefined && req.body.name.trim() !== "") dbUpdateData.username = req.body.name.trim();
     if (req.body.profile !== undefined) dbUpdateData.profile = req.body.profile;
     if (req.body["local-address"] !== undefined) dbUpdateData.localAddress = req.body["local-address"] || null;
     if (req.body["remote-address"] !== undefined) dbUpdateData.remoteAddress = req.body["remote-address"] || null;

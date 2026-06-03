@@ -12,6 +12,7 @@ export default function EditSecret({
   /* =========================
      STATE
   ========================= */
+  const [name, setName] = useState(username || "");
   const [enabled, setEnabled] = useState(true);
   const [comment, setComment] = useState("");
   const [password, setPassword] = useState("");
@@ -67,6 +68,7 @@ export default function EditSecret({
         const data = secretJson.data || {};
         
         // Map data to state
+        setName(data.name || username || "");
         setEnabled(data.disabled !== "yes" && data.disabled !== "true" && data.disabled !== true);
         setComment(data.comment || "");
         setPassword(data.password || "");
@@ -105,6 +107,7 @@ export default function EditSecret({
       setSaving(true);
 
       const payload = {
+        name: name.trim(),
         password,
         service,
         profile,
@@ -204,6 +207,20 @@ export default function EditSecret({
             </div>
           ) : (
             <div className="p-3 bg-body">
+              {/* NAME */}
+              <div className="row mb-2 align-items-center">
+                <label className="col-4 text-end pe-2">Name</label>
+                <div className="col-8">
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Secret name"
+                  />
+                </div>
+              </div>
+
               {/* ENABLED */}
               <div className="row mb-2 align-items-center">
                 <label className="col-4 text-end pe-2">Enabled</label>
