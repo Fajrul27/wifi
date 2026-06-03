@@ -40,8 +40,7 @@ services:
     environment:
       # Database URL pointing to the postgres service
       - DATABASE_URL=postgresql://wifian:wifian123@postgres-db:5432/wifianID?schema=public
-      - REDIS_HOST=redis-server
-      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis-server:6379
       - JWT_SECRET=wifian_secret_key_123 # Ganti dengan secret Anda
       - PORT=5000
     depends_on:
