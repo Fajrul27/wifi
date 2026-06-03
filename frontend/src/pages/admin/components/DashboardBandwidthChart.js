@@ -1,7 +1,65 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 
-export default function DashboardBandwidthChart({ bandwidthData, isDarkMode }) {
+export default function DashboardBandwidthChart({ routersTrafficRef, isDarkMode, selectedRouter }) {
+  const [bandwidthData, setBandwidthData] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem("dashboard_bandwidth");
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+    return Array.from({ length: 20 }, (_, i) => ({
+      time: new Date(Date.now() - (20 - i) * 3000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      download: 0,
+      upload: 0
+    }));
+  });
+
+  useEffect(() => {
+    setBandwidthData(Array.from({ length: 20 }, (_, i) => ({
+      time: new Date(Date.now() - (20 - i) * 3000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      download: 0,
+      upload: 0
+    })));
+  }, [selectedRouter]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBandwidthData(prev => {
+        const newData = [...prev.slice(1)];
+        let totalRx = 0;
+        let totalTx = 0;
+        
+        if (routersTrafficRef && routersTrafficRef.current) {
+          if (selectedRouter) {
+            const t = routersTrafficRef.current[selectedRouter] || routersTrafficRef.current[String(selectedRouter)] || routersTrafficRef.current[Number(selectedRouter)];
+            if (t) {
+              totalRx = t.rx;
+              totalTx = t.tx;
+            }
+          } else {
+            Object.values(routersTrafficRef.current).forEach(t => {
+                totalRx += t.rx;
+                totalTx += t.tx;
+            });
+          }
+        }
+
+        newData.push({
+          time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          download: totalTx, // Router Transmit (TX) = Client Download
+          upload: totalRx    // Router Receive (RX) = Client Upload
+        });
+
+        try {
+          sessionStorage.setItem("dashboard_bandwidth", JSON.stringify(newData));
+        } catch(e) {}
+        
+        return newData;
+      });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [routersTrafficRef, selectedRouter]);
+
   return (
     <div className="card border-0 rounded-4 d-flex flex-column bg-body shadow-sm" style={{ flex: 1, minHeight: 0 }}>
       <div className="card-header bg-transparent border-0 pt-4 pb-2 px-4">

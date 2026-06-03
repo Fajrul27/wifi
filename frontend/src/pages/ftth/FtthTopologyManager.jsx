@@ -355,7 +355,6 @@ export default function OltManagement() {
 
   /* ───────────────── UI STATE ───────────────── */
   const [loading, setLoading] = useState(!globalRoutersCache.length);
-  const [actionLoading, setActionLoading] = useState({});
   const [portLoading, setPortLoading] = useState({});
   
   /* ───────────────── MODAL STATES ───────────────── */
@@ -551,15 +550,12 @@ export default function OltManagement() {
   const handleDeleteOlt = async () => {
     if (!confirmDelete.olt) return;
     const { id, routerId } = confirmDelete.olt;
-    
-    setActionLoading(prev => ({ ...prev, [`delete-olt-${id}`]: true }));
     try {
       await api.delete(`/olts/olt/${id}`);
       await loadRouterOlts(routerId);
     } catch (err) {
       alert("Gagal menghapus OLT: " + err.message);
     } finally {
-      setActionLoading(prev => ({ ...prev, [`delete-olt-${id}`]: false }));
       setConfirmDelete({ show: false, olt: null, portId: null, oltId: null, routerId: null, title: "", message: "", onConfirm: null });
     }
   };

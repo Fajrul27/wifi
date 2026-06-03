@@ -10,13 +10,14 @@ import {
   AttributionControl,
 } from "react-leaflet";
 import { LayersControl } from "react-leaflet";
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+
+const canvasRenderer = L.canvas({ padding: 1.0 });
 
 // =========================
 // 🎨 INJECTED CSS STYLES
@@ -784,8 +785,7 @@ function MapViewportListener({ onBoundsChange, onZoomChange }) {
   return null;
 }
 
-// Custom Leaflet SVG renderer with optimized padding to prevent lines clipping during pan
-const customRenderer = L.svg({ padding: 1.5 });
+
 
 // Optimized connection lines to prevent re-rendering and lag
 const MemoizedUserPolyline = React.memo(({ routerLat, routerLng, userLat, userLng, isOnline }) => {
@@ -919,7 +919,6 @@ export default function NocPppoeMap() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [mapZoom, setMapZoom] = useState(8);
   const [visibleBounds, setVisibleBounds] = useState(null);
-  const [activePopup, setActivePopup] = useState(null); // { type: 'router'|'user', id: any }
 
   // Load routers
   const loadRouters = async () => {
@@ -1001,11 +1000,20 @@ export default function NocPppoeMap() {
       });
   }, [users, statusFilter, searchQuery]);
 
+  const usersInViewCount = useMemo(() => {
+    if (!visibleBounds) return filteredUsers.length;
+    return filteredUsers.filter((u) => {
+      const lat = Number(u.latitude);
+      const lng = Number(u.longitude);
+      return !isNaN(lat) && !isNaN(lng) && visibleBounds.contains([lat, lng]);
+    }).length;
+  }, [filteredUsers, visibleBounds]);
+
   // Viewport bounds & zoom level filtering (LOD) for rendering
   const visibleUsers = useMemo(() => {
-    if (mapZoom < 13) return [];
-    return filteredUsers;
-  }, [filteredUsers, mapZoom]);
+    if (mapZoom >= 13 || usersInViewCount < 50) return filteredUsers;
+    return [];
+  }, [filteredUsers, mapZoom, usersInViewCount]);
 
   const visibleLineUsers = useMemo(() => {
     if (mapZoom < 17) return [];
@@ -1173,6 +1181,7 @@ export default function NocPppoeMap() {
             zoom={8}
             className="noc-leaflet-map"
             preferCanvas={true}
+            renderer={canvasRenderer}
             keyboard={false}
           >
             <MapViewportListener onBoundsChange={setVisibleBounds} onZoomChange={setMapZoom} />
@@ -1220,9 +1229,8 @@ export default function NocPppoeMap() {
                 position={[router.latitude, router.longitude]}
                 icon={createRouterIcon(router.isOnline !== false)}
                 zIndexOffset={1000}
-                eventHandlers={{ click: () => setActivePopup({ type: 'router', id: router.id }) }}
               >
-                <Popup className="noc-popup" autoPan={false} eventHandlers={{ remove: () => setActivePopup(null) }}>
+                <Popup className="noc-popup" autoPan={false}>
                   <>
                     <div className="popup-header">
                       <strong>🖥️ {router.name}</strong>
@@ -1250,9 +1258,8 @@ export default function NocPppoeMap() {
                   position={[u.latitude, u.longitude]}
                   icon={createUserIcon(u.isOnline)}
                   options={{ userData: u }}
-                  eventHandlers={{ click: () => setActivePopup({ type: 'user', id: uId }) }}
                 >
-                  <Popup className="noc-popup" minWidth={280} autoPan={false} eventHandlers={{ remove: () => setActivePopup(null) }}>
+                  <Popup className="noc-popup" minWidth={280} autoPan={false}>
                     <>
                       <div className="popup-header">
                         <strong>👤 {u.username}</strong>

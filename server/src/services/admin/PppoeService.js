@@ -459,6 +459,7 @@ class PppoeService {
     this.cacheTime = 0;
     this.cacheSecrets = [];
     this.cacheActive = [];
+    this.cachedRealtimeUsers = [];
   }
 
   async getSecretsCached() {

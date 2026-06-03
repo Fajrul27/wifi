@@ -129,9 +129,7 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
       prev.weight !== next.weight ||
       prev.dashArray !== next.dashArray ||
       prev.label !== next.label ||
-      prev.isPopupOpen !== next.isPopupOpen ||
-      prev.onClick !== next.onClick ||
-      prev.onPopupClose !== next.onPopupClose) {
+      prev.isPopupOpen !== next.isPopupOpen) {
     return false;
   }
   if (prev.coordinates.length !== next.coordinates.length) return false;

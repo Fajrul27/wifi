@@ -10,6 +10,7 @@ import {
 import AddSecret from "./components/AddSecret";
 import EditSecret from "./components/EditSecret";
 import LocationModal from "./components/EditLocation";
+import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
 // ─────────────────────────────────────────────────────────────
 // CONFIG & UTILS
 // ─────────────────────────────────────────────────────────────
@@ -170,15 +171,13 @@ const PaginationControls = ({ currentPage, totalPages, totalItems, itemsPerPage,
 // ─────────────────────────────────────────────────────────────
 export default function PppoeDashboard() {
   /* ───────────────── STATE ───────────────── */
-  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
-  const [selectedRouter, setSelectedRouter] = useState(() => {
-     if (localStorage.getItem('lock_router') === 'true') {
-         const saved = localStorage.getItem('locked_router_id');
-         if (saved) return Number(saved);
-     }
-     return null;
-  });
-  const [routers, setRouters] = useState([]);
+  const {
+    selectedRouter,
+    setSelectedRouter,
+    routers,
+    isRouterLocked,
+    setIsRouterLocked
+  } = useGlobalRealtime();
 
   /* ───────────────── PAGINATION STATE ───────────────── */
   const [currentPage, setCurrentPage] = useState(1);
@@ -188,7 +187,6 @@ export default function PppoeDashboard() {
   const {
     usersLoading,
     loadUsers,
-    setCachedUsers,
     filteredUsers,
     onlineUsers,
 
@@ -223,10 +221,7 @@ export default function PppoeDashboard() {
   useEffect(() => {
     isMountedRef.current = true;
     const init = async () => {
-      const data = await loadRouters();
-      if (!isMountedRef.current) return;
-      setRouters(data || []);
-      if (data?.length > 0) setSelectedRouter(prev => prev || data[0].id);
+      await loadRouters();
     };
     init();
     return () => { isMountedRef.current = false; };
@@ -238,12 +233,9 @@ export default function PppoeDashboard() {
 
     // Reset pagination when filters change
     setCurrentPage(1);
-
-    // Fetch fresh data once when router is selected
-    // The hook will automatically handle cache and socket updates
-    loadUsers(selectedRouter);
     
-  }, [selectedRouter, loadUsers]);
+    // GlobalRealtimeContext handles fetching and caching in the background automatically.
+  }, [selectedRouter]);
 
   /* ───────────────── RESET PAGE ON FILTER CHANGE ───────────────── */
   useEffect(() => {

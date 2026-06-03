@@ -1,26 +1,27 @@
 import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "leaflet/dist/leaflet.css";
 import "./AdminDashboard.css";
 import L from "leaflet";
 import api from "../../services/api";
-import { socket } from "../../services/socket";
 import { createCustomIcon, MARKER_CONFIG, isValidCoord } from "./utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "./components/DashboardMapComponents";
 import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
 import DashboardSystemLogs from "./components/DashboardSystemLogs";
+import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
+
+const canvasRenderer = L.canvas({ padding: 1.0 });
 
 // Helper to listen to map viewport changes (bounds & zoom)
 function MapViewportListener({ onBoundsChange, onZoomChange }) {
   const map = useMap();
   useEffect(() => {
     const handleMapChange = () => {
-      onBoundsChange(map.getBounds().pad(0.2));
+      onBoundsChange(map.getBounds().pad(1.0));
       onZoomChange(map.getZoom());
     };
     handleMapChange();
@@ -158,19 +159,24 @@ export default function AdminDashboard({
     return () => observer.disconnect();
   }, []);
 
-  const [apiRouters, setApiRouters] = useState([]);
-  const [apiOltPorts, setApiOltPorts] = useState([]);
-  const [apiNodes, setApiNodes] = useState([]);
-  const [apiUsers, setApiUsers] = useState([]);
-  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
-  const [apiSelectedRouter, setApiSelectedRouter] = useState(() => {
-     if (localStorage.getItem('lock_router') === 'true') {
-         const saved = localStorage.getItem('locked_router_id');
-         if (saved) return Number(saved);
-     }
-     return null;
-  });
-  
+  const {
+    routers: ctxRouters,
+    nodes: ctxNodes,
+    setNodes: ctxSetNodes,
+    oltPorts: ctxOltPorts,
+    setOltPorts: ctxSetOltPorts,
+    pppoeUsers: ctxUsers,
+    setPppoeUsers: ctxSetPppoeUsers,
+    eventLogs: ctxEventLogs,
+    selectedRouter: ctxSelectedRouter,
+    setSelectedRouter: ctxSetSelectedRouter,
+    isRouterLocked,
+    setIsRouterLocked,
+    routersTrafficRef: ctxRoutersTrafficRef,
+    addLogEvent: ctxAddLogEvent,
+  } = useGlobalRealtime();
+
+
   const [mapType, setMapType] = useState(() => {
     try { return sessionStorage.getItem('dashboard_map_type') || 'vector'; }
     catch(e) { return 'vector'; }
@@ -202,7 +208,6 @@ export default function AdminDashboard({
       sessionStorage.setItem('dashboard_show_lines', showLines);
     } catch(e) {}
   }, [showClients, showNodes, showLines]);
-  const [eventLogs, setEventLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [visibleSearchCount, setVisibleSearchCount] = useState(7);
@@ -217,34 +222,31 @@ export default function AdminDashboard({
     return () => clearTimeout(timer);
   }, []);
 
-  const [bandwidthData, setBandwidthData] = useState(() => {
-    try {
-      const cached = sessionStorage.getItem("dashboard_bandwidth");
-      if (cached) return JSON.parse(cached);
-    } catch(e) {}
-    return Array.from({ length: 20 }, (_, i) => ({
-      time: new Date(Date.now() - (20 - i) * 3000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      download: 0,
-      upload: 0
-    }));
-  });
+  // bandwidthData state is now managed locally inside DashboardBandwidthChart.js
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const routersTrafficRef = useRef({});
+  // routersTrafficRef: use ctx version when standalone, local otherwise
+  const localRoutersTrafficRef = useRef({});
 
   const isStandalone = propRouters.length === 0;
 
-  const routers = isStandalone ? apiRouters : propRouters;
-  const oltPorts = isStandalone ? apiOltPorts : propOltPorts;
-  const nodes = isStandalone ? apiNodes : propNodes;
-  const pppoeUsers = isStandalone ? apiUsers : propUsers;
-  const selectedRouter = isStandalone ? apiSelectedRouter : propSelectedRouter;
+  // When standalone, consume from GlobalRealtimeContext (persists across nav)
+  // When embedded (e.g. inside another page), use props directly
+  const routers = isStandalone ? ctxRouters : propRouters;
+  const oltPorts = isStandalone ? ctxOltPorts : propOltPorts;
+  const nodes = isStandalone ? ctxNodes : propNodes;
+  const pppoeUsers = isStandalone ? ctxUsers : propUsers;
+  const selectedRouter = isStandalone ? ctxSelectedRouter : propSelectedRouter;
+  const routersTrafficRef = isStandalone ? ctxRoutersTrafficRef : localRoutersTrafficRef;
 
-  const addLogEvent = useCallback((message, type = 'info') => {
-    setEventLogs(prev => {
-      const newLogs = [{ id: Date.now(), time: new Date(), message, type }, ...prev];
-      return newLogs.slice(0, 100); // keep last 100
-    });
-  }, []);
+  // Setter wrappers — when standalone, write to context so changes persist on navigation
+  const [apiSelectedRouter_local, setApiSelectedRouter_local] = useState(null); // eslint-disable-line no-unused-vars
+  const setApiSelectedRouter = isStandalone ? ctxSetSelectedRouter : setApiSelectedRouter_local;
+  const eventLogs = isStandalone ? ctxEventLogs : [];
+
+  // addLogEvent — always call useCallback (hook rules), use ctx fn when standalone
+  const localAddLogEvent = useCallback((message, type = 'info') => {}, []); // eslint-disable-line no-unused-vars
+  const addLogEvent = isStandalone ? ctxAddLogEvent : localAddLogEvent;
+
 
   const [editEntity, setEditEntity] = useState(null);
   const [editForm, setEditForm] = useState({ whatsapp: "", address: "", photoUrl: "", file: null });
@@ -301,233 +303,6 @@ export default function AdminDashboard({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [lightbox.isOpen]);
 
-  useEffect(() => {
-    if (!isStandalone) return;
-
-    // Check cache first for instant load
-    try {
-      const cached = sessionStorage.getItem("dashboard_cache_base");
-      const timestamp = sessionStorage.getItem("dashboard_cache_time");
-      if (cached && timestamp && Date.now() - Number(timestamp) < 60000) { // 1 min cache
-        const data = JSON.parse(cached);
-        setApiRouters(data.routers || []);
-        setApiNodes(data.nodes || []);
-        if (data.logs?.length > 0) {
-          setEventLogs(data.logs.map(log => ({
-            ...log,
-            time: new Date(log.time)
-          })));
-        }
-        if (data.routers?.length > 0) {
-          setApiSelectedRouter(prev => prev || data.routers[0].id);
-        }
-      }
-    } catch(e) {}
-
-    Promise.allSettled([
-      api.get("/routers"),
-      api.get("/topology"),
-      api.get("/splitter"),
-      api.get("/logs"),
-    ]).then(([routerRes, nodesRes, splittersRes, logsRes]) => {
-      const extractData = (res) => {
-        if (res?.status !== 'fulfilled') return [];
-        if (Array.isArray(res.value?.data?.data)) return res.value.data.data;
-        if (Array.isArray(res.value?.data)) return res.value.data;
-        return [];
-      };
-
-      const loadedRouters = extractData(routerRes);
-      const loadedNodes = extractData(nodesRes);
-      const loadedSplitters = extractData(splittersRes);
-      const loadedLogsRaw = extractData(logsRes);
-      
-      const formattedLogs = loadedLogsRaw.length > 0 ? loadedLogsRaw.map(log => ({
-          id: log.id,
-          message: log.message,
-          type: log.type,
-          time: new Date(log.createdAt)
-      })) : [];
-
-      setApiRouters(loadedRouters);
-      setApiNodes(loadedNodes);
-      if (formattedLogs.length > 0) setEventLogs(formattedLogs);
-
-      if (loadedRouters.length > 0) {
-        setApiSelectedRouter(prev => prev || loadedRouters[0].id);
-      }
-
-      // Save to cache
-      try {
-        sessionStorage.setItem("dashboard_cache_base", JSON.stringify({
-          routers: loadedRouters,
-          nodes: loadedNodes,
-          splitters: loadedSplitters,
-          logs: formattedLogs
-        }));
-        sessionStorage.setItem("dashboard_cache_time", Date.now().toString());
-      } catch(e) {}
-
-    });
-  }, [isStandalone, addLogEvent]);
-
-  useEffect(() => {
-    if (!isStandalone || !apiSelectedRouter) return;
-    
-    // Check cache first
-    try {
-      const cacheKey = `dashboard_cache_router_${apiSelectedRouter}`;
-      const cached = sessionStorage.getItem(cacheKey);
-      const timestamp = sessionStorage.getItem(`${cacheKey}_time`);
-      if (cached && timestamp && Date.now() - Number(timestamp) < 60000) {
-        const data = JSON.parse(cached);
-        setApiOltPorts(data.oltPorts || []);
-        setApiUsers(data.users || []);
-        routersTrafficRef.current = {};
-      }
-    } catch(e) {}
-
-    // Fetch router specific data when router changes
-    const fetchRouterData = async () => {
-      try {
-        const [oltRes, usersRes] = await Promise.allSettled([
-          api.get(`/olt-ports/router/${apiSelectedRouter}`),
-          api.get(`/pppoe/${apiSelectedRouter}`)
-        ]);
-        
-        const extractData = (res) => {
-          if (res?.status !== 'fulfilled') return [];
-          if (Array.isArray(res.value?.data?.data)) return res.value.data.data;
-          if (Array.isArray(res.value?.data)) return res.value.data;
-          return [];
-        };
-        
-        const loadedOltPorts = extractData(oltRes);
-        const loadedUsers = extractData(usersRes);
-
-        setApiOltPorts(loadedOltPorts);
-        setApiUsers(loadedUsers);
-        
-        // Save to cache
-        try {
-          const cacheKey = `dashboard_cache_router_${apiSelectedRouter}`;
-          sessionStorage.setItem(cacheKey, JSON.stringify({
-            oltPorts: loadedOltPorts,
-            users: loadedUsers
-          }));
-          sessionStorage.setItem(`${cacheKey}_time`, Date.now().toString());
-        } catch(e) {}
-
-        // Also clear bandwidth data when router changes
-        routersTrafficRef.current = {};
-      } catch (err) {
-        console.error("Failed to load router specific data", err);
-      }
-    };
-    
-    fetchRouterData();
-  }, [isStandalone, apiSelectedRouter]);
-
-  // Socket realtime
-  useEffect(() => {
-    if (!isStandalone || !selectedRouter) return;
-
-    socket.emit("join-router", selectedRouter);
-
-    const handleTopologyStatus = (data) => {
-      // Logic for topology if needed, no longer generating local logs here
-    };
-
-    const handlePppoeRealtime = (data) => {
-      const incoming = data?.data;
-      if (!Array.isArray(incoming)) return;
-
-      let sumRx = 0;
-      let sumTx = 0;
-      for (const r of incoming) {
-          sumRx += Number(r.rxBps || 0);
-          sumTx += Number(r.txBps || 0);
-      }
-      routersTrafficRef.current[data.routerId] = { rx: sumRx, tx: sumTx };
-
-      if (Number(data?.routerId) !== Number(selectedRouter)) return;
-      if (incoming.length === 0) return;
-
-      setApiUsers((prev) => {
-        const map = new Map(prev.map((u) => [u.id, u]));
-        for (const r of incoming) {
-          const old = map.get(r.id) || {};
-          
-          map.set(r.id, {
-            ...old,
-            id: r.id,
-            routerId: r.routerId || old.routerId,
-            username: r.username || old.username,
-            isOnline: !!r.isOnline,
-            profile: r.profile || old.profile || '-',
-            remoteAddress: r.remoteAddress || old.remoteAddress || null,
-            localAddress: r.localAddress || old.localAddress || null,
-            uptime: r.isOnline ? (r.uptime || null) : null,
-            lastSeen: r.lastSeen || old.lastSeen,
-            lastDisconnect: r.lastDisconnect || old.lastDisconnect,
-            latitude: r.latitude !== undefined ? r.latitude : old.latitude,
-            longitude: r.longitude !== undefined ? r.longitude : old.longitude,
-            topologyNodeId: r.topologyNodeId !== undefined ? r.topologyNodeId : old.topologyNodeId,
-            roadCoordinates: r.roadCoordinates !== undefined ? r.roadCoordinates : old.roadCoordinates,
-            whatsapp: r.whatsapp !== undefined ? r.whatsapp : old.whatsapp,
-            address: r.address !== undefined ? r.address : old.address,
-            disabled: r.disabled !== undefined ? r.disabled : old.disabled,
-            rxBps: r.rxBps !== undefined ? r.rxBps : old.rxBps,
-            txBps: r.txBps !== undefined ? r.txBps : old.txBps,
-            rxHuman: r.rxHuman !== undefined ? r.rxHuman : old.rxHuman,
-            txHuman: r.txHuman !== undefined ? r.txHuman : old.txHuman,
-            photoUrl: r.photoUrl !== undefined ? r.photoUrl : old.photoUrl,
-            photoUrl2: r.photoUrl2 !== undefined ? r.photoUrl2 : old.photoUrl2,
-            photoUrl3: r.photoUrl3 !== undefined ? r.photoUrl3 : old.photoUrl3,
-          });
-        }
-        return Array.from(map.values());
-      });
-    };
-
-    const handleNewSystemLog = (log) => {
-      setEventLogs(prev => {
-        const newLog = {
-          id: log.id,
-          message: log.message,
-          type: log.type,
-          time: new Date(log.createdAt)
-        };
-        const updated = [newLog, ...prev].slice(0, 100);
-        
-        // Update session storage so logs survive navigation
-        try {
-          const cachedStr = sessionStorage.getItem("dashboard_cache_base");
-          if (cachedStr) {
-            const cached = JSON.parse(cachedStr);
-            cached.logs = updated.map(l => ({
-              ...l,
-              time: l.time.toISOString ? l.time.toISOString() : new Date(l.time).toISOString()
-            }));
-            sessionStorage.setItem("dashboard_cache_base", JSON.stringify(cached));
-          }
-        } catch(e) {}
-
-        return updated;
-      });
-    };
-
-    socket.on("topology-status-realtime", handleTopologyStatus);
-    socket.on("pppoe-realtime", handlePppoeRealtime);
-    socket.on("new-system-log", handleNewSystemLog);
-
-    return () => {
-      socket.off("topology-status-realtime", handleTopologyStatus);
-      socket.off("pppoe-realtime", handlePppoeRealtime);
-      socket.off("new-system-log", handleNewSystemLog);
-    };
-  }, [isStandalone, selectedRouter]);
-
   const filteredOltPorts = useMemo(() => {
     return selectedRouter 
       ? oltPorts.filter(p => p.routerId === Number(selectedRouter))
@@ -556,18 +331,16 @@ export default function AdminDashboard({
       : pppoeUsers;
   }, [pppoeUsers, selectedRouter]);
 
-  const visibleUsersCount = useMemo(() => {
-    if (!visibleBounds) return 0;
-    let count = 0;
-    filteredUsers.forEach(u => {
-      if (isValidCoord(u.latitude, u.longitude) && visibleBounds.contains([Number(u.latitude), Number(u.longitude)])) {
-        count++;
-      }
-    });
-    return count;
+  const usersInViewCount = useMemo(() => {
+    if (!visibleBounds) return filteredUsers.length;
+    return filteredUsers.filter((u) => {
+      const lat = Number(u.latitude);
+      const lng = Number(u.longitude);
+      return !isNaN(lat) && !isNaN(lng) && visibleBounds.contains([lat, lng]);
+    }).length;
   }, [filteredUsers, visibleBounds]);
 
-  const shouldShowClients = showClients && (mapZoom >= 18 || visibleUsersCount < 50);
+  const shouldShowClients = showClients && (mapZoom >= 18 || usersInViewCount < 50);
 
   const searchResults = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -588,34 +361,7 @@ export default function AdminDashboard({
     return results;
   }, [searchTerm, filteredUsers, filteredNodes, routers]);
 
-  // Real bandwidth data from socket (All Routers)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBandwidthData(prev => {
-        const newData = [...prev.slice(1)];
-        let totalRx = 0;
-        let totalTx = 0;
-        
-        Object.values(routersTrafficRef.current).forEach(t => {
-            totalRx += t.rx;
-            totalTx += t.tx;
-        });
-
-        newData.push({
-          time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          download: totalTx, // Router Transmit (TX) = Client Download
-          upload: totalRx    // Router Receive (RX) = Client Upload
-        });
-
-        try {
-          sessionStorage.setItem("dashboard_bandwidth", JSON.stringify(newData));
-        } catch(e) {}
-        
-        return newData;
-      });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+  // Bandwidth update setInterval was moved to DashboardBandwidthChart.js
 
 
 
@@ -790,6 +536,9 @@ export default function AdminDashboard({
         if (user.topologyNodeId) {
             const node = nodesMap.get(user.topologyNodeId);
             if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
+            if (visibleBounds && !visibleBounds.contains([Number(user.latitude), Number(user.longitude)]) && !visibleBounds.contains([Number(node.latitude), Number(node.longitude)])) {
+                return;
+            }
             const isUserOnline = user.isOnline;
             lines.push({
                 id: `client-${user.id}`,
@@ -807,21 +556,11 @@ export default function AdminDashboard({
     }
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady, visibleBounds, nodes]);
 
   const visibleConnections = useMemo(() => {
-    return connections.filter(line => {
-      // 1. Zoom level LOD: hide client lines when zoomed out
-      if (line.type === 'odp-to-client' && !shouldShowClients) {
-        return false;
-      }
-      // Hide odc/odp lines when zoomed out further
-      if ((line.type === 'odc-to-odp' || line.type === 'olt-to-odc' || line.type === 'node-to-node' || line.type === 'router-to-olt') && mapZoom < 12) {
-        return false;
-      }
-      return true;
-    });
-  }, [connections, mapZoom, shouldShowClients]);
+    return connections;
+  }, [connections]);
 
   const handleMarkerClick = useCallback((entity, type) => {
     setActivePopup({ id: entity.id, type });
@@ -922,13 +661,13 @@ export default function AdminDashboard({
   };
 
 
-  const renderGroupedEntityPopup = (group, index) => {
+  const renderGroupedEntityPopup = useCallback((group, index) => {
     const isOpen = activePopup?.id === index && activePopup?.type === 'group';
     const entity = activeGroupDetailNode;
     const conf = entity ? (MARKER_CONFIG[entity.type] || MARKER_CONFIG.client) : null;
 
     return (
-      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+      <Popup key={`group-node-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
           {isOpen ? (
               <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
                   {/* Left Column: Stacked List */}
@@ -1047,15 +786,15 @@ export default function AdminDashboard({
           )}
       </Popup>
     );
-  };
+  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, handleGroupNodeDetailClick]);
 
-  const renderGroupedClientPopup = (group, index) => {
+  const renderGroupedClientPopup = useCallback((group, index) => {
     const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
     const entity = activeGroupDetailClient;
     const conf = MARKER_CONFIG.client;
 
     return (
-      <Popup minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+      <Popup key={`group-client-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
           {isOpen ? (
               <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
                   {/* Left Column: Stacked List */}
@@ -1167,15 +906,16 @@ export default function AdminDashboard({
           )}
       </Popup>
     );
-  };
+  }, [activePopup, activeGroupDetailClient, isDarkMode, setActivePopup, setActiveGroupDetailClient, setLightbox, setEditEntity, setEditForm]);
 
-  const renderEntityPopup = (entity, type) => {
+  const renderEntityPopup = useCallback((entity, type) => {
     const isOpen = activePopup?.id === entity.id && activePopup?.type === type;
     const tKey = type === 'node' ? entity.type : type;
     const conf = MARKER_CONFIG[tKey] || MARKER_CONFIG.client;
     
+    const popupKey = `entity-${entity.id}-${type}`;
     return (
-        <Popup minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+        <Popup key={popupKey} minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
             {isOpen ? (
                 <>
                     <div className="popup-header d-flex align-items-center gap-2">
@@ -1186,33 +926,36 @@ export default function AdminDashboard({
                     </div>
                     <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
                         {type === 'router' && (
-                            <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Host</span><strong>{entity.host}</strong></div>
+                            <>
+                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                                <div className="mb-1"><span className="text-muted">IP Address:</span> <strong>{entity.ipAddress || '—'}</strong></div>
+                            </>
                         )}
                         {type === 'oltPort' && (
-                            <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Port</span><strong>{entity.port}</strong></div>
-                        )}
-                        {type === 'client' && (
                             <>
-                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Profile</span><strong>{entity.profile || '—'}</strong></div>
-                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
-                                {entity.isOnline && entity.uptime && (
-                                    <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
-                                )}
-                                <div className="mb-2">
-                                    <span className="text-muted d-block" style={{ fontSize: '11px' }}>Traffic Rate</span>
-                                    <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
-                                </div>
-                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                                <div className="mb-1"><span className="text-muted">OLT Name:</span> <strong>{entity.oltName || '—'}</strong></div>
+                                <div className="mb-1"><span className="text-muted">Port No:</span> <strong>{entity.portNumber != null ? entity.portNumber : '—'}</strong></div>
                             </>
                         )}
                         {type === 'node' && (
                             <>
-                                <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Type</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
-                                {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '11px' }}>Details</span><span>{entity.description}</span></div>}
-                                {hasAnyUser(entity.id) && !hasOnlineUser(entity.id) && <div className="mb-2"><span className="badge bg-danger">Offline</span></div>}
-
+                                <div className="mb-1"><span className="text-muted">Tipe:</span> <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
+                                {entity.description && <div className="mb-1 text-muted text-truncate" style={{ maxWidth: '230px' }} title={entity.description}>{entity.description}</div>}
                             </>
                         )}
+                        {type === 'client' && (
+                            <>
+                                <div className="mb-1"><span className="text-muted">Profile:</span> <strong>{entity.profile || '—'}</strong></div>
+                                <div className="mb-1"><span className="text-muted">IP:</span> <strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
+                                {entity.isOnline && entity.uptime && <div className="mb-1"><span className="text-muted">Uptime:</span> <strong>{entity.uptime}</strong></div>}
+                                <div className="mb-1">
+                                    <span className="text-muted">Traffic:</span>
+                                    <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
+                                </div>
+                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                            </>
+                        )}
+
                         {(type === 'node' || type === 'client') && (
                             <>
                                 {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
@@ -1272,7 +1015,7 @@ export default function AdminDashboard({
             )}
         </Popup>
     );
-  };
+  }, [isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, activePopup]);
 
   const getClusterThreshold = (zoom) => {
     if (zoom >= 19) return 0.000005; // ~0.5m (exact overlaps only)
@@ -1328,7 +1071,7 @@ export default function AdminDashboard({
     return Array.from(groupMap.values());
   }, [filteredUsers, mapZoom]);
 
-  const renderMarkers = () => {
+  const mapMarkers = useMemo(() => {
     if (!isDeferredReady) return null;
     const infraMarkers = [];
     const clientMarkers = [];
@@ -1336,7 +1079,6 @@ export default function AdminDashboard({
     if (showNodes) {
         routers.forEach(router => {
         if (!isValidCoord(router.latitude, router.longitude)) return;
-        if (visibleBounds && !visibleBounds.contains([Number(router.latitude), Number(router.longitude)])) return;
         
         const isOpen = activePopup?.id === router.id && activePopup?.type === 'router';
         infraMarkers.push(
@@ -1353,7 +1095,6 @@ export default function AdminDashboard({
 
         filteredOltPorts.forEach(port => {
         if (!isValidCoord(port.latitude, port.longitude)) return;
-        if (visibleBounds && !visibleBounds.contains([Number(port.latitude), Number(port.longitude)])) return;
         
         const isOpen = activePopup?.id === port.id && activePopup?.type === 'oltPort';
         infraMarkers.push(
@@ -1371,7 +1112,6 @@ export default function AdminDashboard({
         // GROUPING OVERLAPPING NODES (Cluster Simulation) - Highly Optimized O(N) Grid Bucketing
         groupedNodes.forEach((group, index) => {
             const center = group[0];
-            if (visibleBounds && !visibleBounds.contains([Number(center.latitude), Number(center.longitude)])) return;
             if (group.length === 1) {
                 const node = group[0];
                 const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
@@ -1457,7 +1197,7 @@ export default function AdminDashboard({
         {clientMarkers}
       </>
     );
-  };
+  }, [isDeferredReady, showNodes, routers, visibleBounds, activePopup, filteredOltPorts, groupedNodes, hasAnyUser, hasOnlineUser, handleMarkerClick, handleGroupMarkerClick, shouldShowClients, groupedUsers, handleGroupClientMarkerClick, renderEntityPopup, renderGroupedEntityPopup, renderGroupedClientPopup]);
 
   const activeRouters = routers.filter(r => r.isOnline).length;
   const totalRouters = routers.length;
@@ -1524,19 +1264,41 @@ export default function AdminDashboard({
 
           addLogEvent(`Info lapangan ${editEntity.name || editEntity.username} berhasil diperbarui`, 'success');
           setEditEntity(null);
+
+          const updatedEntity = {
+              ...editEntity,
+              whatsapp: payload.whatsapp,
+              address: payload.address,
+              photoUrl: payload.photoUrl,
+              photoUrl2: payload.photoUrl2,
+              photoUrl3: payload.photoUrl3
+          };
+
+          if (activeGroupDetailNode && activeGroupDetailNode.id === editEntity.id) {
+              setActiveGroupDetailNode(updatedEntity);
+          }
+          if (activeGroupDetailClient && activeGroupDetailClient.id === editEntity.id) {
+              setActiveGroupDetailClient(updatedEntity);
+          }
+
+          if (editEntity.username) {
+              ctxSetPppoeUsers(prev => prev.map(u => u.username === editEntity.username ? { ...u, ...payload } : u));
+          } else {
+              ctxSetNodes(prev => prev.map(n => n.id === editEntity.id ? { ...n, ...payload } : n));
+          }
           
-          // Reload data
+          // Reload data in background
           api.get("/topology").then(res => {
               const loadedNodes = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
-              setApiNodes(loadedNodes);
+              ctxSetNodes(loadedNodes);
           });
 
-          if (editEntity.username && apiSelectedRouter) {
-              api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
+          if (editEntity.username && selectedRouter) {
+              api.get(`/pppoe/${selectedRouter}`).then(res => {
                   const loadedUsers = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
-                  setApiUsers(loadedUsers);
+                  ctxSetPppoeUsers(loadedUsers);
                   try {
-                      sessionStorage.removeItem(`dashboard_cache_router_${apiSelectedRouter}`);
+                      sessionStorage.removeItem(`dashboard_cache_router_${selectedRouter}`);
                   } catch(e) {}
               });
           }
@@ -1633,14 +1395,14 @@ export default function AdminDashboard({
       
       // Refresh map data
       api.get("/topology").then(res => {
-        setApiNodes(res.data?.data || res.data || []);
+        ctxSetNodes(res.data?.data || res.data || []);
       });
-      if (apiSelectedRouter) {
-        api.get(`/olt-ports/router/${apiSelectedRouter}`).then(res => {
-          setApiOltPorts(res.data?.data || res.data || []);
+      if (selectedRouter) {
+        api.get(`/olt-ports/router/${selectedRouter}`).then(res => {
+          ctxSetOltPorts(res.data?.data || res.data || []);
         });
-        api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
-          setApiUsers(res.data?.data || res.data || []);
+        api.get(`/pppoe/${selectedRouter}`).then(res => {
+          ctxSetPppoeUsers(res.data?.data || res.data || []);
         });
       }
     } catch (error) {
@@ -1695,14 +1457,14 @@ export default function AdminDashboard({
           
           // Refresh map data
           api.get("/topology").then(res => {
-            setApiNodes(res.data?.data || res.data || []);
+            ctxSetNodes(res.data?.data || res.data || []);
           });
-          if (apiSelectedRouter) {
-            api.get(`/olt-ports/router/${apiSelectedRouter}`).then(res => {
-              setApiOltPorts(res.data?.data || res.data || []);
+          if (selectedRouter) {
+            api.get(`/olt-ports/router/${selectedRouter}`).then(res => {
+              ctxSetOltPorts(res.data?.data || res.data || []);
             });
-            api.get(`/pppoe/${apiSelectedRouter}`).then(res => {
-              setApiUsers(res.data?.data || res.data || []);
+            api.get(`/pppoe/${selectedRouter}`).then(res => {
+              ctxSetPppoeUsers(res.data?.data || res.data || []);
             });
           }
         } catch (error) {
@@ -1769,6 +1531,26 @@ export default function AdminDashboard({
       );
     });
   }, [editingCable, cableVertices, showConfirm]);
+
+  const connectionLayers = useMemo(() => {
+    return visibleConnections.map(line => (
+      <MemoizedPolyline 
+          key={`${line.id}-${line.color}`}
+          id={line.id}
+          coordinates={line.coordinates}
+          color={line.color}
+          weight={line.weight}
+          dashArray={line.dashArray}
+          label={line.label}
+          isPopupOpen={activePopup?.type === 'cable' && activePopup?.id === line.id}
+          onClick={() => {
+            handleCableClick(line);
+            setActivePopup({ id: line.id, type: 'cable' });
+          }}
+          onPopupClose={() => setActivePopup(null)}
+      />
+    ));
+  }, [visibleConnections, activePopup, handleCableClick]);
 
   return (
     <div className="container-fluid p-3 bg-body-secondary d-flex flex-column" style={{ height: '100vh', overflow: 'hidden', transition: 'background-color 0.3s' }}>
@@ -1940,6 +1722,7 @@ export default function AdminDashboard({
                 style={{ height: '100%', width: '100%', outline: 'none' }}
                 zoomControl={false}
                 ref={setMapInstance}
+                renderer={canvasRenderer}
                 preferCanvas={true}
                 keyboard={false}
             >
@@ -1970,26 +1753,9 @@ export default function AdminDashboard({
                         subdomains={['mt0','mt1','mt2','mt3']}
                     />
                 )}
+                {connectionLayers}
                 
-                {visibleConnections.map(line => (
-                  <MemoizedPolyline 
-                      key={`${line.id}-${line.color}`}
-                      id={line.id}
-                      coordinates={line.coordinates}
-                      color={line.color}
-                      weight={line.weight}
-                      dashArray={line.dashArray}
-                      label={line.label}
-                      isPopupOpen={activePopup?.type === 'cable' && activePopup?.id === line.id}
-                      onClick={() => {
-                        handleCableClick(line);
-                        setActivePopup({ id: line.id, type: 'cable' });
-                      }}
-                      onPopupClose={() => setActivePopup(null)}
-                  />
-                ))}
-                
-                {renderMarkers()}
+                {mapMarkers}
 
                 {editingCable && (
                   <Polyline
@@ -2114,7 +1880,7 @@ export default function AdminDashboard({
 
         {/* Side Panel: Charts & Logs */}
         <div className="col-lg-3 col-xl-3 h-100 d-flex flex-column gap-3" style={isFullScreen ? { display: 'none' } : {}}>
-          <DashboardBandwidthChart bandwidthData={bandwidthData} isDarkMode={isDarkMode} />
+          <DashboardBandwidthChart routersTrafficRef={routersTrafficRef} isDarkMode={isDarkMode} selectedRouter={selectedRouter} />
           <DashboardSystemLogs eventLogs={eventLogs} />
         </div>
       </div>
@@ -2163,7 +1929,7 @@ export default function AdminDashboard({
                                 )}
 
                                 <div className="mb-3">
-                                    <label className="form-label text-muted small fw-bold">Foto Lokasi (Maksimal 3)</label>
+                                    <label className="form-label text-muted small fw-bold">Foto Lokasi (Maksimal 3, Ukuran Maksimal 2MB per file)</label>
                                     <div className="row g-2">
                                         {[
                                             { id: 1, label: 'Foto 1', url: editForm.photoUrl, file: editForm.file, setUrl: v => setEditForm(prev => ({...prev, photoUrl: v, file: null})), setFile: (file, url) => setEditForm(prev => ({...prev, file, photoUrl: url})) },
@@ -2172,7 +1938,7 @@ export default function AdminDashboard({
                                         ].map(slot => (
                                             <div key={slot.id} className="col-12 col-md-4">
                                                 <div className="p-2 border rounded bg-light text-center h-100 d-flex flex-column justify-content-between">
-                                                    <span className="d-block mb-2 small fw-bold text-muted">{slot.label}</span>
+                                                    <span className="d-block mb-2 small fw-bold text-muted">{slot.label} (Max 2MB)</span>
                                                     {slot.url ? (
                                                         <div className="position-relative d-inline-block mb-2 w-100">
                                                             <img 
@@ -2206,8 +1972,14 @@ export default function AdminDashboard({
                                                         accept="image/*"
                                                         onChange={e => {
                                                             if (e.target.files && e.target.files[0]) {
-                                                                const url = URL.createObjectURL(e.target.files[0]);
-                                                                slot.setFile(e.target.files[0], url);
+                                                                const file = e.target.files[0];
+                                                                if (file.size > 2 * 1024 * 1024) {
+                                                                    showAlert("Ukuran file maksimal adalah 2MB", "File Terlalu Besar", "danger");
+                                                                    e.target.value = "";
+                                                                    return;
+                                                                }
+                                                                const url = URL.createObjectURL(file);
+                                                                slot.setFile(file, url);
                                                             }
                                                         }}
                                                     />

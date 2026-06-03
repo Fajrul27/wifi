@@ -30,19 +30,7 @@ const StatusPill = ({ active, label }) => (
   </span>
 );
 
-const StatCard = ({ icon, label, value, color = "primary" }) => (
-  <div className="card border-0 shadow-sm h-100" style={{ background: "linear-gradient(135deg, #fff 0%, #fafafa 100%)" }}>
-    <div className="card-body py-3 px-4 d-flex align-items-center gap-3">
-      <div className={`bg-${color}-subtle rounded-3 p-2`} style={{ minWidth: "40px", textAlign: "center" }}>
-        <i className={`bi bi-${icon} text-${color} fs-5`}></i>
-      </div>
-      <div>
-        <div className="small text-muted text-uppercase fw-semibold mb-0">{label}</div>
-        <div className={`fs-5 fw-bold text-${color} mb-0`}>{value}</div>
-      </div>
-    </div>
-  </div>
-);
+
 
 // ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
