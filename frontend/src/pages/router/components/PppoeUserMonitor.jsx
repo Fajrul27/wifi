@@ -238,12 +238,18 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
     initGlobalSocket(socket);
 
-    // Join room for this router globally, but NEVER leave it 
-    // so background sync continues even when we are on another page!
-    if (!joinedRouters.has(selectedRouter)) {
+    // Join room on first mount AND on reconnect
+    const joinRoom = () => {
       socket.emit("join-router", selectedRouter);
       joinedRouters.add(selectedRouter);
+    };
+
+    if (socket.connected) {
+      joinRoom();
     }
+    
+    // Always rejoin if socket disconnects and reconnects in the background
+    socket.on("connect", joinRoom);
 
     const setter = (rId, newArr) => {
       if (Number(rId) === Number(selectedRouter) && isMountedRef.current) {
@@ -255,7 +261,8 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
     return () => {
       globalStateSetters.delete(setter);
-      // Notice we DO NOT socket.emit("leave-router"). 
+      socket.off("connect", joinRoom);
+      // We DO NOT socket.emit("leave-router"). 
       // The websocket remains open and updating globalUsersCache silently in the background!
     };
   }, [selectedRouter]);
