@@ -16,11 +16,6 @@ import LocationModal from "./components/EditLocation";
 const safeNumber = (v) => (isNaN(Number(v)) ? 0 : Number(v));
 const formatPercent = (v) => `${safeNumber(v).toFixed(1)}%`;
 
-// Cache configuration
-const CACHE_KEY = (routerId) => `pppoe_users_${routerId}`;
-const CACHE_TIMESTAMP_KEY = (routerId) => `pppoe_ts_${routerId}`;
-const CACHE_TTL = 5 * 60 * 1000; // 5 menit
-
 // Pagination config
 const ITEMS_PER_PAGE_OPTIONS = [25, 50, 100, 250];
 const DEFAULT_ITEMS_PER_PAGE = 50;
@@ -223,30 +218,6 @@ export default function PppoeDashboard() {
 
   /* ───────────────── REFS ───────────────── */
   const isMountedRef = useRef(true);
-  const pollingRef = useRef(null);
-
-  /* ───────────────── CACHE HELPERS ───────────────── */
-  const getCachedUsers = useCallback((routerId) => {
-    try {
-      const cached = sessionStorage.getItem(CACHE_KEY(routerId));
-      const timestamp = sessionStorage.getItem(CACHE_TIMESTAMP_KEY(routerId));
-      if (cached && timestamp && Date.now() - Number(timestamp) < CACHE_TTL) {
-        return JSON.parse(cached);
-      }
-    } catch (e) {
-      console.warn("Cache read error:", e);
-    }
-    return null;
-  }, []);
-
-  const setSessionCache = useCallback((routerId, usersData) => {
-    try {
-      sessionStorage.setItem(CACHE_KEY(routerId), JSON.stringify(usersData));
-      sessionStorage.setItem(CACHE_TIMESTAMP_KEY(routerId), Date.now().toString());
-    } catch (e) {
-      console.warn("Cache write error:", e);
-    }
-  }, []);
 
   /* ───────────────── INIT ROUTERS ───────────────── */
   useEffect(() => {
@@ -261,39 +232,18 @@ export default function PppoeDashboard() {
     return () => { isMountedRef.current = false; };
   }, [loadRouters]);
 
-  /* ───────────────── LOAD USERS WITH CACHE ───────────────── */
+  /* ───────────────── LOAD USERS ───────────────── */
   useEffect(() => {
     if (!selectedRouter) return;
 
     // Reset pagination when filters change
     setCurrentPage(1);
 
-    // 1. Load dari cache untuk instant display
-    const cached = getCachedUsers(selectedRouter);
-    if (cached && setCachedUsers) {
-      setCachedUsers(cached);
-    }
-
-    // 2. Fetch fresh data
-    const fetchFresh = async () => {
-      try {
-        const result = await loadUsers(selectedRouter);
-        if (isMountedRef.current && result?.users) {
-          setSessionCache(selectedRouter, result.users);
-        }
-      } catch (err) {
-        console.error("Failed to fetch users:", err);
-      }
-    };
-    fetchFresh();
-
-    // 3. Polling backup (jika socket terputus)
-    pollingRef.current = setInterval(fetchFresh, 10000);
-
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [selectedRouter, getCachedUsers, setSessionCache, loadUsers, setCachedUsers]);
+    // Fetch fresh data once when router is selected
+    // The hook will automatically handle cache and socket updates
+    loadUsers(selectedRouter);
+    
+  }, [selectedRouter, loadUsers]);
 
   /* ───────────────── RESET PAGE ON FILTER CHANGE ───────────────── */
   useEffect(() => {

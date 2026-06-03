@@ -54,10 +54,17 @@ export const formatTraffic = (value = 0) => {
   return `${v.toFixed(2)} ${units[i]}`;
 };
 
+/* ───────────────── GLOBAL CACHE ───────────────── */
+// This persists the data across page navigations without needing sessionStorage
+const globalUsersCache = {};
+const globalLoadingState = {};
+
 /* ───────────────── HOOK ───────────────── */
 export const usePppoeUserMonitor = (selectedRouter) => {
-  const [users, setUsers] = useState([]);
-  const [usersLoading, setUsersLoading] = useState(false);
+  const [users, setUsers] = useState(() => globalUsersCache[selectedRouter] || []);
+  const [usersLoading, setUsersLoading] = useState(() => 
+    selectedRouter ? (globalLoadingState[selectedRouter] || !globalUsersCache[selectedRouter]) : false
+  );
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -67,9 +74,20 @@ export const usePppoeUserMonitor = (selectedRouter) => {
   const socketRef = useRef(null);
   const isMountedRef = useRef(true);
 
-  // Reset users list when selectedRouter changes to prevent displaying stale users
+  // Sync users when selectedRouter changes
   useEffect(() => {
-    setUsers([]);
+    if (selectedRouter) {
+      if (globalUsersCache[selectedRouter]) {
+        setUsers(globalUsersCache[selectedRouter]);
+        setUsersLoading(false);
+      } else {
+        setUsers([]);
+        setUsersLoading(true);
+      }
+    } else {
+      setUsers([]);
+      setUsersLoading(false);
+    }
   }, [selectedRouter]);
 
   /* ───────── LOAD USERS ───────── */
@@ -77,7 +95,12 @@ export const usePppoeUserMonitor = (selectedRouter) => {
     if (!routerId) return null;
 
     if (!isMountedRef.current) return null;
-    setUsersLoading(true);
+    
+    // Only show loading if we don't have cache
+    if (!globalUsersCache[routerId]) {
+      setUsersLoading(true);
+      globalLoadingState[routerId] = true;
+    }
 
     try {
       const res = await api.get(`/pppoe/${routerId}`);
@@ -104,12 +127,17 @@ export const usePppoeUserMonitor = (selectedRouter) => {
       if (isMountedRef.current) {
         setUsers(processed);
       }
+      
+      // Save to global cache
+      globalUsersCache[routerId] = processed;
+      globalLoadingState[routerId] = false;
 
       return { users: processed, metrics: res.data?.metrics || {} };
     } catch (err) {
       console.error("PPPoE load error:", err);
       return null;
     } finally {
+      globalLoadingState[routerId] = false;
       if (isMountedRef.current) {
         setUsersLoading(false);
       }
@@ -118,27 +146,33 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
   /* ───────── SET CACHED USERS (FOR PERSISTENT CACHE) ───────── */
   // Fungsi ini dipanggil dari dashboard saat ada update dari background monitoring
-  const setCachedUsers = useCallback((newUsers) => {
+  const setCachedUsers = useCallback((newUsers, routerId) => {
     if (!Array.isArray(newUsers)) return;
     
+    const processed = newUsers.map((u) => ({
+      id: u.id,
+      username: u.username || "-",
+      profile: u.profile || "-",
+      ip: u.localAddress || u.remoteAddress || "-",
+      isOnline: parseOnlineStatus(u.isOnline),
+      disabled: !!u.disabled,
+      rx: Number(u.rxRaw ?? u.rx ?? 0),
+      tx: Number(u.txRaw ?? u.tx ?? 0),
+      uptime: u.uptime || "-",
+      downtime: u.downtime || "-",
+      latitude: u.latitude ?? null,
+      longitude: u.longitude ?? null,
+      service: u.service || null,
+      remoteAddress: u.remoteAddress || null,
+      localAddress: u.localAddress || null,
+    }));
+
+    if (routerId) {
+      globalUsersCache[routerId] = processed;
+    }
+
     if (isMountedRef.current) {
-      setUsers(newUsers.map((u) => ({
-        id: u.id,
-        username: u.username || "-",
-        profile: u.profile || "-",
-        ip: u.localAddress || u.remoteAddress || "-",
-        isOnline: parseOnlineStatus(u.isOnline),
-        disabled: !!u.disabled,
-        rx: Number(u.rxRaw ?? u.rx ?? 0),
-        tx: Number(u.txRaw ?? u.tx ?? 0),
-        uptime: u.uptime || "-",
-        downtime: u.downtime || "-",
-        latitude: u.latitude ?? null,
-        longitude: u.longitude ?? null,
-        service: u.service || null,
-        remoteAddress: u.remoteAddress || null,
-        localAddress: u.localAddress || null,
-      })));
+      setUsers(processed);
     }
   }, []);
 
@@ -187,7 +221,9 @@ export const usePppoeUserMonitor = (selectedRouter) => {
           });
         }
 
-        return Array.from(map.values());
+        const newArr = Array.from(map.values());
+        globalUsersCache[selectedRouter] = newArr;
+        return newArr;
       });
     };
 
