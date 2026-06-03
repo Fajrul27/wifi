@@ -75,45 +75,34 @@ async function getClient(router) {
    SYSTEM
 ========================= */
 async function getSystem(client) {
-  try {
-    const res = await client.write("/system/resource/print");
-    const d = res?.[0] || {};
+  const res = await client.write("/system/resource/print");
+  const d = res?.[0] || {};
 
-    return {
-      cpuLoad: Number(d["cpu-load"] || 0),
-      freeMemory: Number(d["free-memory"] || 0),
-      totalMemory: Number(d["total-memory"] || 0),
-      uptime: d["uptime"] || "-",
-      version: d["version"] || "-",
-      boardName: d["board-name"] || "-",
-    };
-  } catch {
-    return null;
-  }
+  return {
+    cpuLoad: Number(d["cpu-load"] || 0),
+    freeMemory: Number(d["free-memory"] || 0),
+    totalMemory: Number(d["total-memory"] || 0),
+    uptime: d["uptime"] || "-",
+    version: d["version"] || "-",
+    boardName: d["board-name"] || "-",
+  };
 }
 
 /* =========================
    TRAFFIC (🔥 PPPoE STYLE CONTRACT)
 ========================= */
 async function getTraffic(client, iface = "ether1") {
-  try {
-    const res = await client.write("/interface/monitor-traffic", [
-      `=interface=${iface}`,
-      "=once",
-    ]);
+  const res = await client.write("/interface/monitor-traffic", [
+    `=interface=${iface}`,
+    "=once",
+  ]);
 
-    const d = res?.[0] || {};
+  const d = res?.[0] || {};
 
-    return {
-      rxBps: Number(d["rx-bits-per-second"] || 0),
-      txBps: Number(d["tx-bits-per-second"] || 0),
-    };
-  } catch {
-    return {
-      rxBps: 0,
-      txBps: 0,
-    };
-  }
+  return {
+    rxBps: Number(d["rx-bits-per-second"] || 0),
+    txBps: Number(d["tx-bits-per-second"] || 0),
+  };
 }
 
 /* =========================

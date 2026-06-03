@@ -473,21 +473,22 @@ class PppoeService {
     }
 
     this._fetchingSecrets = (async () => {
-      const version = this.cacheVersion || 0;
-      await this.connect();
-      const data = await this.client.write("/ppp/secret/print");
-      
-      this._fetchingSecrets = null;
+      try {
+        const version = this.cacheVersion || 0;
+        await this.connect();
+        const data = await this.client.write("/ppp/secret/print");
+        
+        if (version !== (this.cacheVersion || 0)) {
+          this._fetchingSecrets = null;
+          return await this.getSecretsCached();
+        }
 
-      if (version !== (this.cacheVersion || 0)) {
-        // Cache was cleared while we were fetching (e.g. user updated).
-        // This data is stale. Fetch again to ensure we don't return stale data.
-        return await this.getSecretsCached();
+        this.cacheSecrets = data || [];
+        this.cacheSecretsTime = Date.now();
+        return this.cacheSecrets;
+      } finally {
+        this._fetchingSecrets = null;
       }
-
-      this.cacheSecrets = data || [];
-      this.cacheSecretsTime = Date.now();
-      return this.cacheSecrets;
     })();
 
     return await this._fetchingSecrets;
@@ -508,21 +509,22 @@ class PppoeService {
     }
 
     this._fetchingActive = (async () => {
-      const version = this.cacheVersion || 0;
-      await this.connect();
-      const data = await this.client.write("/ppp/active/print");
-      
-      this._fetchingActive = null;
+      try {
+        const version = this.cacheVersion || 0;
+        await this.connect();
+        const data = await this.client.write("/ppp/active/print");
+        
+        if (version !== (this.cacheVersion || 0)) {
+          this._fetchingActive = null;
+          return await this.getActiveUsers();
+        }
 
-      if (version !== (this.cacheVersion || 0)) {
-        // Cache was cleared while we were fetching (e.g. user updated/kicked).
-        // This data is stale. Fetch again.
-        return await this.getActiveUsers();
+        this.cacheActive = data || [];
+        this.cacheTime = Date.now();
+        return this.cacheActive;
+      } finally {
+        this._fetchingActive = null;
       }
-
-      this.cacheActive = data || [];
-      this.cacheTime = Date.now();
-      return this.cacheActive;
     })();
 
     return await this._fetchingActive;
