@@ -255,8 +255,7 @@ export default function PppoeDashboard() {
     if (!selectedRouter) return;
     try {
       await api.post(`/pppoe/${selectedRouter}/sync`);
-      const result = await loadUsers(selectedRouter);
-      if (result?.users) setSessionCache(selectedRouter, result.users);
+      await loadUsers(selectedRouter);
     } catch (err) {
       console.error(err);
       alert(err.response?.data?.message || "Sync failed");
@@ -293,8 +292,7 @@ export default function PppoeDashboard() {
       await api.delete(`/pppoe/${selectedRouter}/user/${username}`);
       triggerRowAnimation(username);
       
-      const result = await loadUsers(selectedRouter);
-      if (result?.users) setSessionCache(selectedRouter, result.users);
+      await loadUsers(selectedRouter);
       
     } catch (err) {
       console.error(err);
@@ -303,7 +301,7 @@ export default function PppoeDashboard() {
       setActionLoading(prev => ({ ...prev, [key]: false }));
       setConfirmDelete({ show: false, user: null });
     }
-  }, [selectedRouter, confirmDelete.user, loadUsers, triggerRowAnimation, setSessionCache]);
+  }, [selectedRouter, confirmDelete.user, loadUsers, triggerRowAnimation]);
 
   /* ───────────────── TOGGLE DISABLE/ENABLE HANDLER ───────────────── */
   const handleToggleDisable = useCallback(async (user) => {
@@ -322,8 +320,7 @@ export default function PppoeDashboard() {
       }
       
       triggerRowAnimation(username);
-      const result = await loadUsers(selectedRouter);
-      if (result?.users) setSessionCache(selectedRouter, result.users);
+      await loadUsers(selectedRouter);
       
       // Add a slight delay to allow the MikroTik to physically disconnect the session
       // and the realtime background sync to catch up, preventing icon blinking.
@@ -334,7 +331,7 @@ export default function PppoeDashboard() {
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [selectedRouter, loadUsers, triggerRowAnimation, setSessionCache]);
+  }, [selectedRouter, loadUsers, triggerRowAnimation]);
 
   /* ───────────────── RECONNECT SESSION HANDLER ───────────────── */
   const handleReconnectUser = useCallback(async (user) => {
@@ -352,8 +349,7 @@ export default function PppoeDashboard() {
       }
       
       triggerRowAnimation(username);
-      const result = await loadUsers(selectedRouter);
-      if (result?.users) setSessionCache(selectedRouter, result.users);
+      await loadUsers(selectedRouter);
       
       // Delay for session cleanup
       await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -363,7 +359,7 @@ export default function PppoeDashboard() {
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [selectedRouter, loadUsers, triggerRowAnimation, setSessionCache]);
+  }, [selectedRouter, loadUsers, triggerRowAnimation]);
 
   /* ───────────────── PAGINATED USERS ───────────────── */
   const paginatedUsers = useMemo(() => {
@@ -783,8 +779,7 @@ export default function PppoeDashboard() {
           onClose={() => setShowAddModal(false)}
           routerId={selectedRouter}
           onSaved={async () => {
-            const result = await loadUsers(selectedRouter);
-            if (result?.users) setSessionCache(selectedRouter, result.users);
+            await loadUsers(selectedRouter);
           }}
         />
 
@@ -799,8 +794,7 @@ export default function PppoeDashboard() {
               setEditingUser(null);
             }}
             onSaved={async () => {
-              const result = await loadUsers(selectedRouter);
-              if (result?.users) setSessionCache(selectedRouter, result.users);
+              await loadUsers(selectedRouter);
             }}
           />
         )}
@@ -812,8 +806,7 @@ export default function PppoeDashboard() {
           routerId={selectedRouter}
           onClose={() => setLocationUser(null)}
           onSaved={async () => {
-            const result = await loadUsers(selectedRouter);
-            if (result?.users) setSessionCache(selectedRouter, result.users);
+            await loadUsers(selectedRouter);
           }}
         />
       </div>
