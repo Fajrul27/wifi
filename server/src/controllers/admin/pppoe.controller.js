@@ -833,9 +833,9 @@ controller.updateUser = async (req, res) => {
     // Log the action
     const LogService = require("../../services/admin/LogService");
     if (req.body.disabled !== undefined) {
-      await LogService.addLog(`User ${username} was ${req.body.disabled ? 'disabled' : 'enabled'} by admin`, req.body.disabled ? 'warning' : 'success');
+      await LogService.addLog(`User ${username} was ${req.body.disabled ? "disabled" : "enabled"} by admin`, req.body.disabled ? "warning" : "success");
     } else {
-      await LogService.addLog(`User ${username} profile/settings updated by admin`, 'info');
+      await LogService.addLog(`User ${username} profile/settings updated by admin`, "info");
     }
 
     res.json({ success: true, message: "User berhasil diperbarui" });
