@@ -44,9 +44,11 @@ export default function EditSecret({
         setLoadingData(true);
         setLoadingProfiles(true);
 
+        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
+        
         // Fetch Profiles
         const profRes = await fetch(
-          `http://localhost:3000/api/pppoe/${routerId}/profiles`
+          `${apiUrl}/pppoe/${routerId}/profiles`
         );
         const profJson = await profRes.json();
         const profData = profJson.data || [];
@@ -54,7 +56,7 @@ export default function EditSecret({
 
         // Fetch Secret Detail
         const secretRes = await fetch(
-          `http://localhost:3000/api/pppoe/${routerId}/user/${username}`
+          `${apiUrl}/pppoe/${routerId}/user/${username}`
         );
         const secretJson = await secretRes.json();
         
@@ -120,8 +122,9 @@ export default function EditSecret({
         "remote-ipv6-prefix-pool": remoteIpv6PrefixPool.trim(),
       };
 
+      const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
       const res = await fetch(
-        `http://localhost:3000/api/pppoe/${routerId}/user/${username}`,
+        `${apiUrl}/pppoe/${routerId}/user/${username}`,
         {
           method: "PUT",
           headers: {

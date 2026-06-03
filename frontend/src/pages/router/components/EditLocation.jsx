@@ -37,8 +37,9 @@ export default function EditLocation({
       setSaving(true);
       setError("");
 
+      const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
       const res = await fetch(
-        `http://localhost:3000/api/pppoe/${routerId}/user/${user.id}/location`,
+        `${apiUrl}/pppoe/${routerId}/user/${user.id}/location`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },

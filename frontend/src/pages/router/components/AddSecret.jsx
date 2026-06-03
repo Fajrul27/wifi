@@ -100,9 +100,10 @@ export default function AddSecret({
             true
           );
 
+        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
           const res =
             await fetch(
-              `http://localhost:3000/api/pppoe/${routerId}/profiles`
+              `${apiUrl}/pppoe/${routerId}/profiles`
             );
 
           const json =
@@ -308,9 +309,10 @@ export default function AddSecret({
           payload
         );
 
+        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
         const res =
           await fetch(
-            `http://localhost:3000/api/pppoe/${routerId}/user`,
+            `${apiUrl}/pppoe/${routerId}/user`,
             {
               method: "POST",
 

@@ -98,7 +98,10 @@ export const useRouterMonitor = (selectedRouter, timeRange) => {
     let reconnect;
 
     const connect = () => {
-      ws = new WebSocket("ws://localhost:5050");
+        const wsUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') 
+          ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/`
+          : "ws://localhost:5050";
+        ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => setSocketConnected(true);
