@@ -59,6 +59,59 @@ export const formatTraffic = (value = 0) => {
 const globalUsersCache = {};
 const globalLoadingState = {};
 
+let isGlobalSocketInitialized = false;
+const globalStateSetters = new Set();
+const joinedRouters = new Set();
+
+const initGlobalSocket = (socket) => {
+  if (isGlobalSocketInitialized || !socket) return;
+  isGlobalSocketInitialized = true;
+  
+  socket.on("pppoe-realtime", (msg) => {
+    if (msg?.type !== "pppoe-realtime") return;
+    const rId = msg.routerId ? Number(msg.routerId) : null;
+    const data = msg?.data;
+    if (!Array.isArray(data) || !rId) return;
+
+    const prev = globalUsersCache[rId] || [];
+    const map = new Map(prev.map((u) => [u.id, u]));
+
+    for (const r of data) {
+      const old = map.get(r.id) || {};
+      const isOnline = !!r.isOnline;
+
+      map.set(r.id, {
+        ...old,
+        id: r.id,
+        username: r.username || old.username,
+        profile: r.profile || old.profile,
+        isOnline,
+        disabled: r.disabled !== undefined ? !!r.disabled : old.disabled,
+        ip: r.localAddress || r.remoteAddress || old.ip || "-",
+        rx: Number(r.rxBps ?? r.rxRaw ?? old.rx ?? 0),
+        tx: Number(r.txBps ?? r.txRaw ?? old.tx ?? 0),
+        uptime: isOnline ? r.uptime || "-" : "-",
+        downtime: !isOnline
+          ? (r.downtime && r.downtime !== "0s" ? r.downtime : "-")
+          : "-",
+        latitude: old.latitude ?? null,
+        longitude: old.longitude ?? null,
+        service: r.service || old.service,
+        remoteAddress: r.remoteAddress || old.remoteAddress,
+        localAddress: r.localAddress || old.localAddress,
+      });
+    }
+
+    const newArr = Array.from(map.values());
+    globalUsersCache[rId] = newArr;
+    
+    // Notify all active mounted components
+    globalStateSetters.forEach(setter => {
+      setter(rId, newArr);
+    });
+  });
+};
+
 /* ───────────────── HOOK ───────────────── */
 export const usePppoeUserMonitor = (selectedRouter) => {
   const [users, setUsers] = useState(() => globalUsersCache[selectedRouter] || []);
@@ -183,55 +236,27 @@ export const usePppoeUserMonitor = (selectedRouter) => {
     isMountedRef.current = true;
     socketRef.current = socket;
 
-    // Join room for this router
-    socket.emit("join-router", selectedRouter);
+    initGlobalSocket(socket);
 
-    const handler = (msg) => {
-      if (msg?.type !== "pppoe-realtime") return;
-      if (msg.routerId && Number(msg.routerId) !== Number(selectedRouter)) return;
-      const data = msg?.data;
-      if (!Array.isArray(data)) return;
+    // Join room for this router globally, but NEVER leave it 
+    // so background sync continues even when we are on another page!
+    if (!joinedRouters.has(selectedRouter)) {
+      socket.emit("join-router", selectedRouter);
+      joinedRouters.add(selectedRouter);
+    }
 
-      setUsers((prev) => {
-        const map = new Map(prev.map((u) => [u.id, u]));
-
-        for (const r of data) {
-          const old = map.get(r.id) || {};
-          const isOnline = !!r.isOnline;
-
-          map.set(r.id, {
-            ...old,
-            id: r.id,
-            username: r.username || old.username,
-            profile: r.profile || old.profile,
-            isOnline,
-            disabled: r.disabled !== undefined ? !!r.disabled : old.disabled,
-            ip: r.localAddress || r.remoteAddress || old.ip || "-",
-            rx: Number(r.rxBps ?? r.rxRaw ?? old.rx ?? 0),
-            tx: Number(r.txBps ?? r.txRaw ?? old.tx ?? 0),
-            uptime: isOnline ? r.uptime || "-" : "-",
-            downtime: !isOnline
-              ? (r.downtime && r.downtime !== "0s" ? r.downtime : "-")
-              : "-",
-            latitude: old.latitude ?? null,
-            longitude: old.longitude ?? null,
-            service: r.service || old.service,
-            remoteAddress: r.remoteAddress || old.remoteAddress,
-            localAddress: r.localAddress || old.localAddress,
-          });
-        }
-
-        const newArr = Array.from(map.values());
-        globalUsersCache[selectedRouter] = newArr;
-        return newArr;
-      });
+    const setter = (rId, newArr) => {
+      if (Number(rId) === Number(selectedRouter) && isMountedRef.current) {
+        setUsers(newArr);
+      }
     };
 
-    socket.on("pppoe-realtime", handler);
+    globalStateSetters.add(setter);
 
     return () => {
-      socket.off("pppoe-realtime", handler);
-      socket.emit("leave-router", selectedRouter);
+      globalStateSetters.delete(setter);
+      // Notice we DO NOT socket.emit("leave-router"). 
+      // The websocket remains open and updating globalUsersCache silently in the background!
     };
   }, [selectedRouter]);
 
