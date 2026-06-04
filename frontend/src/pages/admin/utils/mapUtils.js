@@ -59,3 +59,26 @@ export const isValidCoord = (lat, lng) => {
   const lg = parseFloat(lng);
   return !isNaN(lt) && !isNaN(lg) && lt !== 0 && lg !== 0 && lt >= -90 && lt <= 90 && lg >= -180 && lg <= 180;
 };
+
+export const sanitizeCoordinates = (coords) => {
+  if (!Array.isArray(coords)) return null;
+  const valid = [];
+  for (let i = 0; i < coords.length; i++) {
+    const pt = coords[i];
+    if (Array.isArray(pt) && pt.length >= 2) {
+      const lat = Number(pt[0]);
+      const lng = Number(pt[1]);
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        valid.push([lat, lng]);
+      }
+    } else if (pt && typeof pt === 'object') {
+      const lat = Number(pt.lat ?? pt.latitude);
+      const lng = Number(pt.lng ?? pt.longitude);
+      if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        valid.push([lat, lng]);
+      }
+    }
+  }
+  return valid.length >= 2 ? valid : null;
+};
+

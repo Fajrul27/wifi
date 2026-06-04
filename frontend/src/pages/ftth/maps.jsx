@@ -789,11 +789,20 @@ function MapViewportListener({ onBoundsChange, onZoomChange }) {
 
 // Optimized connection lines to prevent re-rendering and lag
 const MemoizedUserPolyline = React.memo(({ routerLat, routerLng, userLat, userLng, isOnline }) => {
+  const rLat = Number(routerLat);
+  const rLng = Number(routerLng);
+  const uLat = Number(userLat);
+  const uLng = Number(userLng);
+
+  if (isNaN(rLat) || isNaN(rLng) || isNaN(uLat) || isNaN(uLng) || rLat === 0 || rLng === 0 || uLat === 0 || uLng === 0) {
+    return null;
+  }
+
   return (
     <Polyline
       positions={[
-        [routerLat, routerLng],
-        [userLat, userLng],
+        [rLat, rLng],
+        [uLat, uLng],
       ]}
       noClip={true}
       pathOptions={{

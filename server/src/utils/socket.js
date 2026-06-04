@@ -1,6 +1,9 @@
 const WebSocket = require("ws");
 
-const wss = new WebSocket.Server({ port: 5050 });
+const wsPort = process.env.WS_PORT || 5050;
+const wss = new WebSocket.Server({ port: wsPort });
+
+console.log(`⚡ WebSocket Server running on port ${wsPort}`);
 
 let clients = [];
 

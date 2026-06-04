@@ -1757,13 +1757,16 @@ export default function AdminDashboard({
                 
                 {mapMarkers}
 
-                {editingCable && (
-                  <Polyline
-                    ref={cablePolylineRef}
-                    positions={cableVertices}
-                    pathOptions={{ color: '#ffb300', weight: 6, opacity: 0.9, dashArray: '5,10' }}
-                  />
-                )}
+                {editingCable && (() => {
+                  const sanitizedCable = cableVertices.filter(v => v && !isNaN(Number(v[0])) && !isNaN(Number(v[1])));
+                  return (
+                    <Polyline
+                      ref={cablePolylineRef}
+                      positions={sanitizedCable}
+                      pathOptions={{ color: '#ffb300', weight: 6, opacity: 0.9, dashArray: '5,10' }}
+                    />
+                  );
+                })()}
 
                 {vertexMarkers}
 

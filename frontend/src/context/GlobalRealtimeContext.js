@@ -119,7 +119,7 @@ export function GlobalRealtimeProvider({ children }) {
     const connect = () => {
       const wsUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') 
         ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/`
-        : "ws://localhost:5050";
+        : `ws://localhost:${process.env.REACT_APP_WS_PORT || 5050}`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -134,7 +134,9 @@ export function GlobalRealtimeProvider({ children }) {
         reconnect = setTimeout(connect, 3000);
       };
 
-      ws.onerror = () => ws.close();
+      ws.onerror = (err) => {
+        // Let browser handle closing naturally
+      };
 
       ws.onmessage = (event) => {
         try {
@@ -196,7 +198,11 @@ export function GlobalRealtimeProvider({ children }) {
       if (ws) {
         ws.onclose = null;
         ws.onerror = null;
-        ws.close();
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          try {
+            ws.close();
+          } catch (e) {}
+        }
       }
     };
   }, [selectedRouter]);

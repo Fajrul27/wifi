@@ -68,8 +68,8 @@ export default function DashboardBandwidthChart({ routersTrafficRef, isDarkMode,
         </h6>
       </div>
       <div className="card-body px-3 pb-4 pt-0 d-flex flex-column flex-grow-1" style={{ minHeight: 0 }}>
-          <div style={{ width: '100%', minHeight: '120px', flex: 1 }}>
-          <ResponsiveContainer width="100%" height="100%">
+          <div style={{ width: '100%', minHeight: '120px', flex: 1, position: 'relative' }}>
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <AreaChart data={bandwidthData} margin={{ top: 10, right: 10, left: 8, bottom: 0 }}>
                   <defs>
                       <linearGradient id="colorDownload" x1="0" y1="0" x2="0" y2="1">

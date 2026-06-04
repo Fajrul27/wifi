@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useMap, Polyline, Popup, Marker } from 'react-leaflet';
 import L from 'leaflet';
+import { sanitizeCoordinates } from '../utils/mapUtils';
 
 // Component to auto-fit map bounds to markers
 export function FitMapBounds({ coordinates, selectedRouter }) {
@@ -111,9 +112,12 @@ export function FitMapBounds({ coordinates, selectedRouter }) {
 
 // Optimized connection lines to prevent re-rendering and lag
 export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label, isPopupOpen, onClick, onPopupClose }) => {
+  const sanitized = React.useMemo(() => sanitizeCoordinates(coordinates), [coordinates]);
+  if (!sanitized) return null;
+
   return (
     <Polyline 
-      positions={coordinates}
+      positions={sanitized}
       pathOptions={{ color, weight, opacity: 0.85, dashArray, lineCap: "round" }}
       eventHandlers={onClick ? { click: onClick } : undefined}
     >
@@ -132,10 +136,13 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
       prev.isPopupOpen !== next.isPopupOpen) {
     return false;
   }
-  if (prev.coordinates.length !== next.coordinates.length) return false;
-  for (let i = 0; i < prev.coordinates.length; i++) {
-    const p = prev.coordinates[i];
-    const n = next.coordinates[i];
+  const pCoords = Array.isArray(prev.coordinates) ? prev.coordinates : [];
+  const nCoords = Array.isArray(next.coordinates) ? next.coordinates : [];
+  if (pCoords.length !== nCoords.length) return false;
+  for (let i = 0; i < pCoords.length; i++) {
+    const p = pCoords[i];
+    const n = nCoords[i];
+    if (!p || !n) return false;
     if (Array.isArray(p) && Array.isArray(n)) {
       if (p[0] !== n[0] || p[1] !== n[1]) return false;
     } else if (p.lat !== n.lat || p.lng !== n.lng) {
