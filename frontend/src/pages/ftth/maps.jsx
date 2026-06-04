@@ -804,14 +804,12 @@ const MemoizedUserPolyline = React.memo(({ routerLat, routerLng, userLat, userLn
         [rLat, rLng],
         [uLat, uLng],
       ]}
-      noClip={true}
       pathOptions={{
         color: isOnline ? "#22c55e" : "#ef4444",
         weight: isOnline ? 2 : 1,
         opacity: isOnline ? 0.7 : 0.4,
         dashArray: isOnline ? null : "5,8",
-        lineCap: "round",
-        noClip: true
+        lineCap: "round"
       }}
     />
   );
@@ -975,19 +973,13 @@ export default function NocPppoeMap() {
   // Socket realtime
   useEffect(() => {
     const handleUpdate = (msg) => {
-      if (msg.routerId !== Number(selectedRouter)) return;
-      setUsers((prev) => {
-        const idx = prev.findIndex((u) => u.username === msg.data.username);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = msg.data;
-          return updated;
-        }
-        return [...prev, msg.data];
-      });
+      if (Number(msg.routerId) !== Number(selectedRouter)) return;
+      if (Array.isArray(msg.data)) {
+        setUsers(msg.data);
+      }
     };
-    socket.on("pppoe", handleUpdate);
-    return () => socket.off("pppoe", handleUpdate);
+    socket.on("pppoe-realtime", handleUpdate);
+    return () => socket.off("pppoe-realtime", handleUpdate);
   }, [selectedRouter]);
 
   // Filter users
@@ -1025,14 +1017,8 @@ export default function NocPppoeMap() {
   }, [filteredUsers, mapZoom, usersInViewCount]);
 
   const visibleLineUsers = useMemo(() => {
-    if (mapZoom < 17) return [];
-    return filteredUsers.filter((u) => {
-      if (!visibleBounds) return true;
-      const lat = Number(u.latitude);
-      const lng = Number(u.longitude);
-      return visibleBounds.contains([lat, lng]);
-    });
-  }, [filteredUsers, mapZoom, visibleBounds]);
+    return filteredUsers;
+  }, [filteredUsers]);
 
   // Collect coordinates for fit bounds
   const allCoordinates = useMemo(() => {
@@ -1319,7 +1305,7 @@ export default function NocPppoeMap() {
             })}
 
             {/* Connection Lines */}
-            {mapZoom >= 17 && router?.latitude && router?.longitude && visibleLineUsers.map((u) => (
+            {router?.latitude && router?.longitude && visibleLineUsers.map((u) => (
               <MemoizedUserPolyline
                 key={`line-${u.id || u.username}-${u.isOnline ? 'on' : 'off'}`}
                 routerLat={router.latitude}

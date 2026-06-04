@@ -497,7 +497,7 @@ export default function AdminDashboard({
           type: 'olt-to-odc',
           color: !anyUser ? '#94a3b8' : (isOnline ? '#2563eb' : '#ef4444'),
           weight: !anyUser ? 3 : (isOnline ? 4 : 5),
-          dashArray: !anyUser ? '4,4' : (isOnline ? undefined : '8,6'),
+          dashArray: !anyUser ? '4,4' : (isOnline ? null : '8,6'),
           animate: !anyUser ? false : isOnline,
           label: !anyUser ? `Feeder OLT ➔ ${node.name} (Kosong)` : (isOnline ? `Feeder OLT ➔ ${node.name}` : `⚠️ PUTUS: OLT ➔ ${node.name}`)
         });
@@ -515,7 +515,7 @@ export default function AdminDashboard({
           
           let defaultColor = isODP ? '#f59e0b' : '#8b5cf6';
           let lineColor = !anyUser ? '#94a3b8' : (isOnline ? defaultColor : '#ef4444');
-          let lineDash = !anyUser ? '4,4' : (isOnline ? undefined : '8,6');
+          let lineDash = !anyUser ? '4,4' : (isOnline ? null : '8,6');
 
           lines.push({
             id: `node-${node.id}`,
@@ -536,9 +536,6 @@ export default function AdminDashboard({
         if (user.topologyNodeId) {
             const node = nodesMap.get(user.topologyNodeId);
             if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
-            if (visibleBounds && !visibleBounds.contains([Number(user.latitude), Number(user.longitude)]) && !visibleBounds.contains([Number(node.latitude), Number(node.longitude)])) {
-                return;
-            }
             const isUserOnline = user.isOnline;
             lines.push({
                 id: `client-${user.id}`,
@@ -546,7 +543,7 @@ export default function AdminDashboard({
                 type: 'odp-to-client',
                 color: isUserOnline ? '#10b981' : '#ef4444',
                 weight: isUserOnline ? 3 : 4,
-                dashArray: isUserOnline ? undefined : '6,6',
+                dashArray: isUserOnline ? null : '6,6',
                 animate: isUserOnline,
                 label: `Drop: ${node.name} ➔ ${user.username}`
             });
@@ -556,7 +553,7 @@ export default function AdminDashboard({
     }
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady, visibleBounds, nodes]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady, nodes]);
 
   const visibleConnections = useMemo(() => {
     return connections;

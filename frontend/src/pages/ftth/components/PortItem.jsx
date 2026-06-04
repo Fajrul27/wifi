@@ -163,8 +163,6 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh, parentPath 
   const usedPorts = odp.ports?.filter(p => p.isUsed).length ?? 0;
   const totalPorts = odp.ports?.length ?? 0;
 
-  const [unassigning, setUnassigning] = useState(null);
-
   const handleUnassign = (port) => {
     const userId = port.user?.id ?? port.userId;
     if (!userId) { 
@@ -180,15 +178,12 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh, parentPath 
     const userId = port.user?.id ?? port.userId;
     if (!userId) return;
 
-    setUnassigning(port.id);
     setUnassignConfirm({ show: false, port: null });
     try {
       await api.post(`/topology/odp/unassign/${userId}`);
       onRefresh?.();
     } catch (err) { 
       alert("Gagal unassign: " + (err.response?.data?.message || err.message)); 
-    } finally {
-      setUnassigning(null);
     }
   };
 
@@ -256,13 +251,8 @@ const OdpItem = ({ odp, routerId, onDeleteOdp, onEditOdp, onRefresh, parentPath 
                   className={`btn btn-sm py-1 px-2 ${port.isUsed ? "btn-success" : "btn-outline-secondary"}`}
                   style={{ fontSize: "0.68rem", lineHeight: 1.3, minWidth: "52px" }}
                   title={port.isUsed ? `${port.user?.username ?? "Terpakai"} — klik untuk lepas` : `Port #${port.index} — klik untuk assign`}
-                  disabled={unassigning === port.id}
                   onClick={() => port.isUsed ? handleUnassign(port) : setAssignModal({ show: true, port })}>
-                  {unassigning === port.id ? (
-                    <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                  ) : (
-                    <i className={`bi bi-${port.isUsed ? "person-fill" : "person-plus"}`} />
-                  )}
+                  <i className={`bi bi-${port.isUsed ? "person-fill" : "person-plus"}`} />
                   <span className="ms-1">#{port.index}</span>
                   {port.isUsed && port.user && (
                     <span className="d-block" style={{ fontSize: "0.58rem", opacity: 0.9 }}>{port.user.username}</span>
@@ -558,7 +548,7 @@ export default function PortItem({
       {/* TREE AREA */}
       {expanded && (
         <div className="border-top px-3 py-2" style={{ background: "#f9fafb" }}>
-          {loadingTree ? (
+          {loadingTree && odcTree.length === 0 ? (
             <div className="d-flex align-items-center gap-2 py-2">
               <span className="spinner-border spinner-border-sm text-primary" />
               <small className="text-muted">Memuat topology...</small>
@@ -569,21 +559,23 @@ export default function PortItem({
               <small className="text-muted">Belum ada ODC. Klik tombol <strong>ODC</strong> di atas untuk pasang.</small>
             </div>
           ) : (
-            odcTree.map(odc => (
-              <OdcTreeItem
-                key={odc.id} odc={odc} level={0}
-                onAddChildOdc={onCreateChildOdc}
-                onAddOdp={onCreateOdp}
-                onDeleteOdc={(o) => onDeleteOdc?.(o, () => fetchTree(true))}
-                onDeleteOdp={(o) => onDeleteOdp?.(o, () => fetchTree(true))}
-                onEditOdc={(o) => onEditOdc?.(o, () => fetchTree(true))}
-                onEditOdp={(o) => onEditOdp?.(o, fetchTree)}
-                childOdcMap={childOdcMap}
-                routerId={olt?.routerId}
-                onRefresh={fetchTree}
-                parentPath={`${olt.name} • Port #${port.index}`}
-              />
-            ))
+            <>
+              {odcTree.map(odc => (
+                <OdcTreeItem
+                  key={odc.id} odc={odc} level={0}
+                  onAddChildOdc={onCreateChildOdc}
+                  onAddOdp={onCreateOdp}
+                  onDeleteOdc={(o) => onDeleteOdc?.(o, () => fetchTree(true))}
+                  onDeleteOdp={(o) => onDeleteOdp?.(o, () => fetchTree(true))}
+                  onEditOdc={(o) => onEditOdc?.(o, () => fetchTree(true))}
+                  onEditOdp={(o) => onEditOdp?.(o, () => fetchTree(true))}
+                  childOdcMap={childOdcMap}
+                  routerId={olt?.routerId}
+                  onRefresh={() => fetchTree(true)}
+                  parentPath={`${olt.name} • Port #${port.index}`}
+                />
+              ))}
+            </>
           )}
         </div>
       )}
