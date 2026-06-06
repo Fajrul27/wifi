@@ -4,8 +4,8 @@ import { GlobalRealtimeProvider } from "./context/GlobalRealtimeContext";
 
 export default function App() {
   return (
-    <GlobalRealtimeProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <GlobalRealtimeProvider>
         <Routes>
           {routes.map((r, i) => {
             const Page = r.element;
@@ -35,7 +35,7 @@ export default function App() {
             );
           })}
         </Routes>
-      </BrowserRouter>
-    </GlobalRealtimeProvider>
+      </GlobalRealtimeProvider>
+    </BrowserRouter>
   );
 }

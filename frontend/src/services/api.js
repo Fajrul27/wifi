@@ -59,6 +59,7 @@ api.interceptors.response.use(
 ========================= */
 function handleLogoutRedirect() {
   if (isRedirecting) return;
+  if (window.location.pathname === "/") return;
 
   isRedirecting = true;
 

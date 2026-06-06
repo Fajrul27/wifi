@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import api from "../services/api";
 import { socket } from "../services/socket";
 
@@ -35,6 +36,9 @@ const normalizeTraffic = (v) => {
 };
 
 export function GlobalRealtimeProvider({ children }) {
+  const location = useLocation();
+  const isLoginPage = location.pathname === "/";
+
   const [routers, setRouters] = useState([]);
   const [nodes, setNodes] = useState([]);
   const [oltPorts, setOltPorts] = useState([]);
@@ -109,9 +113,23 @@ export function GlobalRealtimeProvider({ children }) {
     });
   }, [selectedRouter]);
 
+  // Connect/disconnect socket based on whether we are on the login page
+  useEffect(() => {
+    if (isLoginPage) {
+      if (socket.connected) {
+        socket.disconnect();
+      }
+      return;
+    }
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+  }, [isLoginPage]);
+
   // Raw WebSocket connection to router realtime on port 5050
   useEffect(() => {
-    if (!selectedRouter) return;
+    if (isLoginPage || !selectedRouter) return;
 
     let ws;
     let reconnect;
@@ -205,10 +223,28 @@ export function GlobalRealtimeProvider({ children }) {
         }
       }
     };
-  }, [selectedRouter]);
+  }, [selectedRouter, isLoginPage]);
 
-  // ─── Load Base Data (routers, nodes) once on mount ───────────────────────
+  // ─── Load Base Data (routers, nodes) once on mount or when navigating away from login page ───────────────────────
+  const [isBaseFetched, setIsBaseFetched] = useState(false);
+
   useEffect(() => {
+    if (isLoginPage) {
+      // Clear data and state on login page (e.g. on logout)
+      setIsInitialized(false);
+      setIsBaseFetched(false);
+      setRouters([]);
+      setNodes([]);
+      setOltPorts([]);
+      setPppoeUsers([]);
+      setEventLogs([]);
+      setSelectedRouter(null);
+      return;
+    }
+
+    if (isBaseFetched) return;
+    setIsBaseFetched(true);
+
     // Try session cache first
     try {
       const cached = sessionStorage.getItem("dashboard_cache_base");
@@ -267,11 +303,11 @@ export function GlobalRealtimeProvider({ children }) {
         sessionStorage.setItem("dashboard_cache_time", Date.now().toString());
       } catch (e) {}
     });
-  }, []);
+  }, [isLoginPage, isBaseFetched]);
 
   // ─── Load Router-Specific Data (oltPorts, users) when selectedRouter changes ───
   useEffect(() => {
-    if (!selectedRouter) return;
+    if (isLoginPage || !selectedRouter) return;
 
     // Try cache first
     try {
@@ -321,19 +357,20 @@ export function GlobalRealtimeProvider({ children }) {
     };
 
     fetchRouterData();
-  }, [selectedRouter]);
+  }, [selectedRouter, isLoginPage]);
 
   // ─── Socket: join router room ─────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedRouter) return;
+    if (isLoginPage || !selectedRouter) return;
     socket.emit("join-router", selectedRouter);
     return () => {
       socket.emit("leave-router", selectedRouter);
     };
-  }, [selectedRouter]);
+  }, [selectedRouter, isLoginPage]);
 
   // ─── Socket: pppoe-realtime ───────────────────────────────────────────────
   useEffect(() => {
+    if (isLoginPage) return;
     const handlePppoeRealtime = (data) => {
       const incoming = data?.data;
       if (!Array.isArray(incoming)) return;
@@ -382,10 +419,11 @@ export function GlobalRealtimeProvider({ children }) {
 
     socket.on("pppoe-realtime", handlePppoeRealtime);
     return () => socket.off("pppoe-realtime", handlePppoeRealtime);
-  }, [selectedRouter]);
+  }, [selectedRouter, isLoginPage]);
 
   // ─── Socket: topology-status-realtime ────────────────────────────────────
   useEffect(() => {
+    if (isLoginPage) return;
     const handleTopologyStatus = (data) => {
       if (!data?.nodes?.length && !data?.oltPorts?.length) return;
       if (data.nodes?.length > 0) {
@@ -410,10 +448,11 @@ export function GlobalRealtimeProvider({ children }) {
 
     socket.on("topology-status-realtime", handleTopologyStatus);
     return () => socket.off("topology-status-realtime", handleTopologyStatus);
-  }, []);
+  }, [isLoginPage]);
 
   // ─── Socket: new-system-log ───────────────────────────────────────────────
   useEffect(() => {
+    if (isLoginPage) return;
     const handleNewSystemLog = (log) => {
       if (!log?.message) return;
       setEventLogs((prev) => {
@@ -436,7 +475,7 @@ export function GlobalRealtimeProvider({ children }) {
 
     socket.on("new-system-log", handleNewSystemLog);
     return () => socket.off("new-system-log", handleNewSystemLog);
-  }, []);
+  }, [isLoginPage]);
 
   return (
     <GlobalRealtimeContext.Provider
