@@ -487,7 +487,7 @@ export default function AdminDashboard({
     });
 
     filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
-      const port = filteredOltPorts.find(p => p.id === node.oltPortId);
+      const port = filteredOltPorts.find(p => Number(p.id) === Number(node.oltPortId));
       if (isValidCoord(port?.latitude, port?.longitude) && isValidCoord(node.latitude, node.longitude)) {
         const anyUser = hasAnyUser(node.id);
         const isOnline = anyUser ? hasOnlineUser(node.id) : true;

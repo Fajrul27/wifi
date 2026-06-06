@@ -335,7 +335,7 @@ export default function TechnicianDashboard({
     if (!selectedRouter) return nodes;
     const isNodeOnRouter = (node) => {
       if (node.oltPortId) {
-        const port = oltPorts.find(p => p.id === node.oltPortId);
+        const port = oltPorts.find(p => Number(p.id) === Number(node.oltPortId));
         return port?.routerId === Number(selectedRouter);
       }
       if (node.parentNodeId) {
@@ -411,6 +411,7 @@ export default function TechnicianDashboard({
     const hasAnyMap = new Map();
     const hasOnlineMap = new Map();
 
+    // Group users by topologyNodeId for O(1) lookup
     const usersByNode = new Map();
     filteredUsers.forEach(u => {
       if (u.topologyNodeId) {
@@ -421,26 +422,64 @@ export default function TechnicianDashboard({
       }
     });
 
-    filteredNodes.forEach(node => {
-      const nodeUsers = usersByNode.get(node.id) || [];
-      if (nodeUsers.length > 0) {
-        hasAnyMap.set(node.id, true);
-        const online = nodeUsers.some(u => u.isOnline);
-        if (online) {
-          hasOnlineMap.set(node.id, true);
+    // Group children nodes by parentNodeId for O(1) lookup
+    const childrenByNode = new Map();
+    filteredNodes.forEach(n => {
+      const parentId = n.incomingLinks?.[0]?.fromNodeId || n.parentNodeId;
+      if (parentId) {
+        if (!childrenByNode.has(parentId)) {
+          childrenByNode.set(parentId, []);
         }
+        childrenByNode.get(parentId).push(n);
       }
+    });
+
+    // Helper functions with local caching
+    const checkAny = (nodeId) => {
+      if (hasAnyMap.has(nodeId)) return hasAnyMap.get(nodeId);
+      
+      const direct = usersByNode.get(nodeId);
+      if (direct && direct.length > 0) {
+        hasAnyMap.set(nodeId, true);
+        return true;
+      }
+      
+      const children = childrenByNode.get(nodeId) || [];
+      const childHasAny = children.some(child => checkAny(child.id));
+      hasAnyMap.set(nodeId, childHasAny);
+      return childHasAny;
+    };
+
+    const checkOnline = (nodeId) => {
+      if (hasOnlineMap.has(nodeId)) return hasOnlineMap.get(nodeId);
+
+      const direct = usersByNode.get(nodeId) || [];
+      if (direct.some(u => u.isOnline)) {
+        hasOnlineMap.set(nodeId, true);
+        return true;
+      }
+
+      const children = childrenByNode.get(nodeId) || [];
+      const childHasOnline = children.some(child => checkOnline(child.id));
+      hasOnlineMap.set(nodeId, childHasOnline);
+      return childHasOnline;
+    };
+
+    // Precompute for all nodes
+    filteredNodes.forEach(n => {
+      checkAny(n.id);
+      checkOnline(n.id);
     });
 
     return { hasAnyMap, hasOnlineMap };
   }, [filteredUsers, filteredNodes]);
 
-  const hasAnyUser = useCallback((nodeId) => {
-    return userStatusMap.hasAnyMap.has(nodeId);
+  const hasOnlineUser = useCallback((nodeId) => {
+    return userStatusMap.hasOnlineMap.get(nodeId) || false;
   }, [userStatusMap]);
 
-  const hasOnlineUser = useCallback((nodeId) => {
-    return userStatusMap.hasOnlineMap.has(nodeId);
+  const hasAnyUser = useCallback((nodeId) => {
+    return userStatusMap.hasAnyMap.get(nodeId) || false;
   }, [userStatusMap]);
 
   const nodesMap = useMemo(() => {
@@ -467,7 +506,7 @@ export default function TechnicianDashboard({
     });
 
     filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
-      const port = filteredOltPorts.find(p => p.id === node.oltPortId);
+      const port = filteredOltPorts.find(p => Number(p.id) === Number(node.oltPortId));
       if (isValidCoord(port?.latitude, port?.longitude) && isValidCoord(node.latitude, node.longitude)) {
         const anyUser = hasAnyUser(node.id);
         const isOnline = anyUser ? hasOnlineUser(node.id) : true;

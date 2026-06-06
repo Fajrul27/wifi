@@ -2,6 +2,7 @@ const prisma = require("../../../utils/prisma");
 
 
 const { deleteImage } = require("../../../utils/cloudinary");
+const { getRoadRoute } = require("../../../utils/routing");
 
 // =====================================================
 // UTIL
@@ -72,6 +73,25 @@ async createOdc(data) {
 
     const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
 
+    let roadCoordsVal = null;
+    if (oltPortId && data.latitude && data.longitude) {
+      const port = await tx.oltPort.findUnique({
+        where: { id: oltPortId },
+        include: { olt: true }
+      });
+      if (port && port.olt && port.olt.latitude !== null && port.olt.longitude !== null) {
+        try {
+          const coords = await getRoadRoute(
+            Number(port.olt.latitude), Number(port.olt.longitude),
+            Number(data.latitude), Number(data.longitude)
+          );
+          if (coords) roadCoordsVal = JSON.stringify(coords);
+        } catch (e) {
+          console.error("Failed to compute road route for new ODC:", e);
+        }
+      }
+    }
+
     const created = await tx.odc.create({
       data: {
         name: data.name.trim(),
@@ -79,6 +99,7 @@ async createOdc(data) {
         splitRatio: data.splitRatio,
         latitude: toCoord(data.latitude),
         longitude: toCoord(data.longitude),
+        roadCoordinates: roadCoordsVal,
       },
     });
 
@@ -171,6 +192,19 @@ async createOdc(data) {
 
       const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
 
+      let roadCoordsVal = null;
+      if (parent.latitude !== null && parent.longitude !== null && data.latitude && data.longitude) {
+        try {
+          const coords = await getRoadRoute(
+            Number(parent.latitude), Number(parent.longitude),
+            Number(data.latitude), Number(data.longitude)
+          );
+          if (coords) roadCoordsVal = JSON.stringify(coords);
+        } catch (e) {
+          console.error("Failed to compute road route for new child ODC:", e);
+        }
+      }
+
       const child = await tx.odc.create({
         data: {
           name: data.name.trim(),
@@ -179,6 +213,7 @@ async createOdc(data) {
           splitRatio: data.splitRatio,
           latitude: toCoord(data.latitude),
           longitude: toCoord(data.longitude),
+          roadCoordinates: roadCoordsVal,
         },
       });
 
@@ -385,10 +420,13 @@ async createOdc(data) {
         let parentLat = null;
         let parentLng = null;
         if (odc.oltPortId) {
-          const port = await tx.oltPort.findUnique({ where: { id: odc.oltPortId } });
-          if (port && port.latitude !== null && port.longitude !== null) {
-            parentLat = Number(port.latitude);
-            parentLng = Number(port.longitude);
+          const port = await tx.oltPort.findUnique({
+            where: { id: odc.oltPortId },
+            include: { olt: true }
+          });
+          if (port && port.olt && port.olt.latitude !== null && port.olt.longitude !== null) {
+            parentLat = Number(port.olt.latitude);
+            parentLng = Number(port.olt.longitude);
           }
         } else if (odc.parentOdcId) {
           const parentOdc = await tx.odc.findUnique({ where: { id: odc.parentOdcId } });
@@ -600,6 +638,19 @@ async createOdc(data) {
     // =====================================================
     const toCoord = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : null);
 
+    let roadCoordsVal = null;
+    if (odc.latitude !== null && odc.longitude !== null && data.latitude && data.longitude) {
+      try {
+        const coords = await getRoadRoute(
+          Number(odc.latitude), Number(odc.longitude),
+          Number(data.latitude), Number(data.longitude)
+        );
+        if (coords) roadCoordsVal = JSON.stringify(coords);
+      } catch (e) {
+        console.error("Failed to compute road route for new ODP:", e);
+      }
+    }
+
     const odp = await tx.odp.create({
       data: {
         name: data.name.trim(),
@@ -607,6 +658,7 @@ async createOdc(data) {
         splitRatio: data.splitRatio,
         latitude: toCoord(data.latitude),
         longitude: toCoord(data.longitude),
+        roadCoordinates: roadCoordsVal,
       },
     });
 

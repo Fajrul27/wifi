@@ -87,34 +87,46 @@ class OltPortService {
   // =====================================================
 
   async findAll() {
-
-    return await prisma.oltPort.findMany({
+    const ports = await prisma.oltPort.findMany({
       include: {
-
-        router: {
+        olt: {
           select: {
-            id: true,
+            routerId: true,
             name: true,
-            host: true,
-            port: true,
-            isOnline: true,
             latitude: true,
             longitude: true,
-            lastSeen: true,
-          },
-        },
-
-        _count: {
-          select: {
-            nodes: true,
-          },
-        },
+            router: {
+              select: {
+                id: true,
+                name: true,
+                host: true,
+                port: true,
+                isOnline: true,
+                latitude: true,
+                longitude: true,
+                lastSeen: true,
+              }
+            }
+          }
+        }
       },
-
       orderBy: {
         id: "desc",
       },
     });
+
+    return ports.map(p => ({
+      id: p.id,
+      routerId: p.olt?.routerId,
+      name: p.olt ? `${p.olt.name} - Port ${p.index}` : `Port ${p.index}`,
+      port: `PON ${p.index}`,
+      latitude: p.olt?.latitude,
+      longitude: p.olt?.longitude,
+      isUsed: p.isUsed,
+      roadCoordinates: p.roadCoordinates,
+      createdAt: p.createdAt,
+      router: p.olt?.router
+    }));
   }
 
   // =====================================================

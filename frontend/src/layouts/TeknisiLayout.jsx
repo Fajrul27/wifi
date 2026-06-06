@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useLayoutEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { flushSync } from "react-dom";
 import api from "../services/api";
 import menu from "../config/menu";
 import { FaBars } from "react-icons/fa";
@@ -12,9 +13,77 @@ export default function TeknisiLayout({ children }) {
   const [user, setUser] = useState(null);
   const [openMenus, setOpenMenus] = useState({});
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [loadingLogout, setLoadingLogout] = useState(false);
+
+  /* =========================
+     THEME EFFECT
+  ========================= */
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark-mode');
+      root.setAttribute('data-bs-theme', 'dark');
+    } else {
+      root.classList.remove('dark-mode');
+      root.setAttribute('data-bs-theme', 'light');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  /* =========================
+     THEME TOGGLE WAVE ANIMATION
+  ========================= */
+  const toggleTheme = (e) => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    
+    if (!document.startViewTransition) {
+      setTheme(nextTheme);
+      return;
+    }
+    
+    const button = e.currentTarget;
+    const rect = button.getBoundingClientRect();
+    const x = e.clientX || (rect.left + rect.width / 2);
+    const y = e.clientY || (rect.top + rect.height / 2);
+    
+    const maxRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    );
+
+    const transition = document.startViewTransition(() => {
+      flushSync(() => {
+        setTheme(nextTheme);
+      });
+    });
+
+    transition.ready.then(() => {
+      const ripple = document.createElement('div');
+      ripple.className = 'theme-ripple-wave';
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
+      ripple.style.setProperty('--ripple-max-radius', `${maxRadius}px`);
+      document.body.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 900);
+
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${maxRadius}px at ${x}px ${y}px)`
+          ]
+        },
+        {
+          duration: 800,
+          easing: 'cubic-bezier(0.76, 0, 0.24, 1)',
+          pseudoElement: '::view-transition-new(root)'
+        }
+      );
+    });
+  };
 
   /* =========================
      FETCH USER
@@ -135,13 +204,26 @@ export default function TeknisiLayout({ children }) {
 
         {/* LOGO */}
         <div className="logo px-3 py-3">
-          <div className="logo-box">T</div>
-
-          <div>
-            <div className="fw-bold">Teknisi Panel</div>
-            <div className="user-email-top">
-              {user?.email || "loading..."}
+          <div className="d-flex w-100 justify-content-between align-items-center">
+            <div className="d-flex align-items-center gap-2">
+              <div className="logo-box">T</div>
+              <div>
+                <div className="fw-bold text-nowrap">Teknisi Panel</div>
+                <div className="user-email-top text-nowrap overflow-hidden text-truncate" style={{ maxWidth: '120px' }}>
+                  {user?.email || "loading..."}
+                </div>
+              </div>
             </div>
+            <button 
+              onClick={toggleTheme}
+              title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
+              className="theme-toggle-btn"
+            >
+              <div className={`theme-icon-wrapper ${theme}`}>
+                <i className="bi bi-sun-fill sun-icon"></i>
+                <i className="bi bi-moon-stars-fill moon-icon"></i>
+              </div>
+            </button>
           </div>
         </div>
 
@@ -172,7 +254,7 @@ export default function TeknisiLayout({ children }) {
         .layout {
           display: flex;
           height: 100vh;
-          background: #f4f6f9;
+          background: var(--bs-body-bg, #f4f6f9);
         }
 
         .sidebar {
@@ -237,6 +319,8 @@ export default function TeknisiLayout({ children }) {
 
         .content {
           flex: 1;
+          height: 100vh;
+          overflow-y: auto;
           padding: 20px;
         }
 

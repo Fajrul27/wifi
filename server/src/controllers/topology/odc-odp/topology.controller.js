@@ -1,6 +1,7 @@
 const TopologyService = require("../../../services/topology/odc-odp/TopologyService");
 const prisma = require("../../../utils/prisma");
 const { getRoadRoute } = require("../../../utils/routing");
+const { broadcastTopologyUpdate } = require("../../../utils/topologyBroadcaster");
 
 class TopologyController {
 
@@ -11,6 +12,7 @@ class TopologyController {
   async createOdc(req, res) {
     try {
       const result = await TopologyService.createOdc(req.body);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODC created successfully", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -25,6 +27,7 @@ class TopologyController {
     try {
       const { id } = req.params;
       const result = await TopologyService.updateOdc(id, req.body);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODC updated successfully", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -39,6 +42,7 @@ class TopologyController {
     try {
       const { parentId } = req.params;
       const result = await TopologyService.createOdcChild(parentId, req.body);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "Child ODC created successfully", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -67,6 +71,7 @@ class TopologyController {
     try {
       const { id } = req.params;
       const result = await TopologyService.deleteOdc(id);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODC deleted", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -80,6 +85,7 @@ class TopologyController {
   async createOdp(req, res) {
     try {
       const result = await TopologyService.createOdp(req.body);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODP created successfully", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -94,6 +100,7 @@ class TopologyController {
     try {
       const { id } = req.params;
       const result = await TopologyService.updateOdp(id, req.body);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODP updated successfully", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -128,6 +135,7 @@ class TopologyController {
       }
 
       const result = await TopologyService.assignUserToOdp(odpId, userId, odpPortId);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "User assigned to ODP", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -142,6 +150,7 @@ class TopologyController {
     try {
       const { userId } = req.params;
       const result = await TopologyService.unassignUserFromOdp(userId);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "User unassigned from ODP", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });
@@ -156,6 +165,7 @@ class TopologyController {
     try {
       const { id } = req.params;
       const result = await TopologyService.deleteOdp(id);
+      broadcastTopologyUpdate(); // async broadcast
       return res.json({ success: true, message: "ODP deleted", data: result });
     } catch (err) {
       return res.status(400).json({ success: false, message: err.message });

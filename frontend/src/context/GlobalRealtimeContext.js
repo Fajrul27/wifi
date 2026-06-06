@@ -307,7 +307,21 @@ export function GlobalRealtimeProvider({ children }) {
 
   // ─── Load Router-Specific Data (oltPorts, users) when selectedRouter changes ───
   useEffect(() => {
-    if (isLoginPage || !selectedRouter) return;
+    if (isLoginPage) return;
+
+    if (!selectedRouter) {
+      const fetchAllOltPorts = async () => {
+        try {
+          const res = await api.get("/olt-ports");
+          const loadedOltPorts = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+          setOltPorts(loadedOltPorts);
+        } catch (err) {
+          console.error("Failed to load all OLT ports", err);
+        }
+      };
+      fetchAllOltPorts();
+      return;
+    }
 
     // Try cache first
     try {
@@ -425,30 +439,22 @@ export function GlobalRealtimeProvider({ children }) {
   useEffect(() => {
     if (isLoginPage) return;
     const handleTopologyStatus = (data) => {
-      if (!data?.nodes?.length && !data?.oltPorts?.length) return;
-      if (data.nodes?.length > 0) {
-        setNodes((prev) => {
-          const map = new Map(prev.map((n) => [n.id, n]));
-          data.nodes.forEach((n) => {
-            if (map.has(n.id)) map.set(n.id, { ...map.get(n.id), ...n });
-          });
-          return Array.from(map.values());
-        });
+      if (data?.nodes) {
+        setNodes(data.nodes);
       }
-      if (data.oltPorts?.length > 0) {
-        setOltPorts((prev) => {
-          const map = new Map(prev.map((p) => [p.id, p]));
-          data.oltPorts.forEach((p) => {
-            if (map.has(p.id)) map.set(p.id, { ...map.get(p.id), ...p });
-          });
-          return Array.from(map.values());
-        });
+      if (data?.oltPorts) {
+        if (selectedRouter) {
+          const routerIdNum = Number(selectedRouter);
+          setOltPorts(data.oltPorts.filter(p => p.routerId === routerIdNum));
+        } else {
+          setOltPorts(data.oltPorts);
+        }
       }
     };
 
     socket.on("topology-status-realtime", handleTopologyStatus);
     return () => socket.off("topology-status-realtime", handleTopologyStatus);
-  }, [isLoginPage]);
+  }, [isLoginPage, selectedRouter]);
 
   // ─── Socket: new-system-log ───────────────────────────────────────────────
   useEffect(() => {

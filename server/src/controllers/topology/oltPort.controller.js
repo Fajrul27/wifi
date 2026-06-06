@@ -3,6 +3,7 @@
 
 const oltPortService = require("../../services/topology/oltPort.service");
 const { getRoadRoute } = require("../../utils/routing");
+const { broadcastTopologyUpdate } = require("../../utils/topologyBroadcaster");
 
 class OltPortController {
 
@@ -155,6 +156,8 @@ class OltPortController {
         req.body
       );
 
+      broadcastTopologyUpdate(); // async broadcast
+
       return res.status(200).json({
         success: true,
         message: "OLT Port berhasil diupdate",
@@ -180,6 +183,8 @@ class OltPortController {
       const result = await oltPortService.delete(
         req.params.id
       );
+
+      broadcastTopologyUpdate(); // async broadcast
 
       return res.status(200).json({
         success: true,
