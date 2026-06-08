@@ -13,6 +13,7 @@ import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
 import DashboardSystemLogs from "./components/DashboardSystemLogs";
 import NodePortDetailModal from "./components/NodePortDetailModal";
+import LiveSessionDuration from "./components/LiveSessionDuration";
 import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
 
 const canvasRenderer = L.canvas({ padding: 1.0 });
@@ -1080,9 +1081,7 @@ export default function AdminDashboard({
                               <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Profile</span><strong>{entity.profile || '—'}</strong></div>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>IP Address</span><strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
-                                  {entity.isOnline && entity.uptime && (
-                                      <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
-                                  )}
+                                  <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>{entity.isOnline ? 'Uptime' : 'Downtime'}</span><strong><LiveSessionDuration user={entity} /></strong></div>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
 
                                   {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
@@ -1268,7 +1267,7 @@ export default function AdminDashboard({
                             <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
                         </div>
                         <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
-                        <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>
+                        {type !== 'client' && <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>}
                     </div>
                     <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
                         {type === 'router' && (
@@ -1308,7 +1307,7 @@ export default function AdminDashboard({
                             <>
                                 <div className="mb-1"><span className="text-muted">Profile:</span> <strong>{entity.profile || '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">IP:</span> <strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
-                                {entity.isOnline && entity.uptime && <div className="mb-1"><span className="text-muted">Uptime:</span> <strong>{entity.uptime}</strong></div>}
+                                <div className="mb-1"><span className="text-muted">{entity.isOnline ? 'Uptime:' : 'Downtime:'}</span> <strong><LiveSessionDuration user={entity} /></strong></div>
                                 <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                             </>
                         )}

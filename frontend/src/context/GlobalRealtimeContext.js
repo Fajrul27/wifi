@@ -454,25 +454,27 @@ export function GlobalRealtimeProvider({ children }) {
         const map = new Map(prev.map((u) => [u.id, u]));
         for (const r of incoming) {
           const old = map.get(r.id) || {};
+          const isOnline = !!r.isOnline;
+          const fallbackDisconnectAt = !isOnline && old.isOnline ? new Date().toISOString() : old.lastDisconnect;
           map.set(r.id, {
             ...old,
             id: r.id,
             routerId: r.routerId ?? old.routerId,
             username: r.username ?? old.username,
-            isOnline: !!r.isOnline,
+            isOnline,
             disabled: r.disabled !== undefined ? !!r.disabled : !!old.disabled,
             profile: r.profile ?? old.profile ?? "-",
             // Use ?? to preserve null/empty string from new data, only fallback to old if undefined
             remoteAddress: r.remoteAddress !== undefined ? r.remoteAddress : old.remoteAddress ?? null,
             localAddress: r.localAddress !== undefined ? r.localAddress : old.localAddress ?? null,
             ip: r.localAddress || r.remoteAddress || null,
-            uptime: r.isOnline ? (r.uptime ?? null) : null,
-            downtime: !r.isOnline ? (r.downtime ?? old.downtime ?? null) : null,
+            uptime: isOnline ? (r.uptime ?? null) : null,
+            downtime: !isOnline ? (r.downtime ?? old.downtime ?? "0s") : null,
             lastSeen: r.lastSeen ?? old.lastSeen,
-            lastDisconnect: r.lastDisconnect ?? old.lastDisconnect,
+            lastDisconnect: r.lastDisconnect ?? fallbackDisconnectAt,
             realtimeUpdatedAt: Date.now(),
-            rx: r.isOnline ? (r.rxBps ?? 0) : 0,
-            tx: r.isOnline ? (r.txBps ?? 0) : 0,
+            rx: isOnline ? (r.rxBps ?? 0) : 0,
+            tx: isOnline ? (r.txBps ?? 0) : 0,
             latitude: r.latitude !== undefined ? r.latitude : old.latitude,
             longitude: r.longitude !== undefined ? r.longitude : old.longitude,
             topologyNodeId: r.topologyNodeId !== undefined ? r.topologyNodeId : old.topologyNodeId,
