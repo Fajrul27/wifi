@@ -115,3 +115,38 @@ export const buildCableCoordinates = (routeCoords, startLat, startLng, endLat, e
     [Number(endLat), Number(endLng)],
   ];
 };
+
+export const getMapEntityStatus = (entity, type, context = {}) => {
+  const {
+    routers = [],
+    hasOnlineUser,
+  } = context;
+
+  if (!entity) {
+    return { isOnline: false, label: "Offline", color: "#ef4444", badgeClass: "bg-danger" };
+  }
+
+  let isOnline = false;
+
+  if (type === "router" || entity.type === "Router") {
+    isOnline = entity.isOnline === true;
+  } else if (type === "client" || entity.username) {
+    isOnline = entity.isOnline === true;
+  } else if (type === "oltPort" || entity.type === "oltPort") {
+    const router = entity.router || routers.find((r) => Number(r.id) === Number(entity.routerId));
+    isOnline = router?.isOnline === true;
+  } else if (type === "node" || entity.type === "ODC" || entity.type === "ODP") {
+    if (typeof entity.isOnline === "boolean") {
+      isOnline = entity.isOnline;
+    } else if (typeof hasOnlineUser === "function") {
+      isOnline = hasOnlineUser(entity.id) === true;
+    }
+  }
+
+  return {
+    isOnline,
+    label: isOnline ? "Online" : "Offline",
+    color: isOnline ? "#10b981" : "#ef4444",
+    badgeClass: isOnline ? "bg-success" : "bg-danger",
+  };
+};

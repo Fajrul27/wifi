@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../../services/api';
+import { getMapEntityStatus } from '../utils/mapUtils';
 
 const NodePortDetailModal = ({
   show,
@@ -132,6 +133,36 @@ const NodePortDetailModal = ({
     : (data?.ports?.filter(p => p.isUsed).length ?? 0);
   const freePorts  = totalPorts - usedPorts;
 
+  const hasOnlineUser = (nodeId) => {
+    const id = Number(nodeId);
+    const possibleIds = [id, id >= 100000 ? id - 100000 : id + 100000];
+    const directOnline = pppoeUsers.some(
+      u => possibleIds.includes(Number(u.topologyNodeId)) && u.isOnline === true
+    );
+    if (directOnline) return true;
+
+    return nodes
+      .filter(n => Number(n.parentNodeId) === id)
+      .some(child => hasOnlineUser(child.id));
+  };
+
+  const findNodeByConnection = (port) => {
+    if (port.connectedOdpId) {
+      return nodes.find(n => n.type === 'ODP' && (Number(n.id) === Number(port.connectedOdpId) || Number(n.id) === Number(port.connectedOdpId) + 100000));
+    }
+
+    if (port.connectedOdcId) {
+      return nodes.find(n => n.type === 'ODC' && Number(n.id) === Number(port.connectedOdcId));
+    }
+
+    return null;
+  };
+
+  const currentStatus = getMapEntityStatus(node, node?.type === 'Router' ? 'router' : node?.type === 'oltPort' ? 'oltPort' : 'node', {
+    routers: node?.router ? [node.router] : [],
+    hasOnlineUser,
+  });
+
   // ── Port card renderer ───────────────────────────────────────────────────────
   const renderPortCard = (port) => {
     const isPortUsed = port.isUsed;
@@ -168,14 +199,18 @@ const NodePortDetailModal = ({
                     <div className="text-muted mb-1">Connected to ODC:</div>
                     <div className="d-flex flex-column gap-1">
                       {port.connectedOdcs?.map(odc => (
-                        <div
-                          key={odc.id}
-                          className="fw-bold text-truncate text-primary"
-                          style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                          onClick={() => onNavigateToEntity && onNavigateToEntity(odc.id, 'node')}
-                          title={`Klik untuk menuju ke ${odc.name}`}
-                        >
-                          <i className="bi bi-diagram-3-fill me-1"></i> {odc.name}
+                        <div key={odc.id} className="d-flex align-items-center gap-1">
+                          <div
+                            className="fw-bold text-truncate text-primary flex-grow-1"
+                            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={() => onNavigateToEntity && onNavigateToEntity(odc.id, 'node')}
+                            title={`Klik untuk menuju ke ${odc.name}`}
+                          >
+                            <i className="bi bi-diagram-3-fill me-1"></i> {odc.name}
+                          </div>
+                          <span className={`badge ${getMapEntityStatus(odc, 'node', { hasOnlineUser }).badgeClass}`} style={{ fontSize: '9px' }}>
+                            {getMapEntityStatus(odc, 'node', { hasOnlineUser }).label}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -213,6 +248,15 @@ const NodePortDetailModal = ({
                   // ODC port → shows connected ODP or child ODC (click → navigate to node)
                   <div style={{ fontSize: '11px' }}>
                     <div className="text-muted mb-1">Connected to:</div>
+                    {(() => {
+                      const connectedNode = findNodeByConnection(port);
+                      const status = getMapEntityStatus(connectedNode || port, 'node', { hasOnlineUser });
+                      return (
+                        <div className="mb-1">
+                          <span className={`badge ${status.badgeClass}`} style={{ fontSize: '9px' }}>{status.label}</span>
+                        </div>
+                      );
+                    })()}
                     <div
                       className="fw-bold text-truncate text-primary"
                       style={{ cursor: 'pointer', textDecoration: 'underline' }}
@@ -333,6 +377,9 @@ const NodePortDetailModal = ({
                 }}
               >
                 {node?.type === 'oltPort' ? 'OLT' : node?.type}
+              </span>
+              <span className={`badge ${currentStatus.badgeClass} mt-1 ms-1`}>
+                {currentStatus.label}
               </span>
             </div>
           </div>

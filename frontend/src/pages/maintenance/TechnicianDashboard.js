@@ -5,7 +5,7 @@ import "leaflet/dist/leaflet.css";
 import "../admin/AdminDashboard.css";
 import L from "leaflet";
 import api from "../../services/api";
-import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates } from "../admin/utils/mapUtils";
+import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates, getMapEntityStatus } from "../admin/utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "../admin/components/DashboardMapComponents";
 import DashboardKpiCards from "../admin/components/DashboardKpiCards";
 import DashboardBandwidthChart from "../admin/components/DashboardBandwidthChart";
@@ -908,14 +908,21 @@ export default function TechnicianDashboard({
                   <div className="d-flex flex-column px-2" style={{ flexGrow: 1, minWidth: '280px' }}>
                       {entity ? (
                           <>
+                              {(() => {
+                                const status = getMapEntityStatus(entity, 'node', { hasOnlineUser });
+                                return (
                               <div className="popup-header d-flex align-items-center gap-2 mb-2 pb-2 border-bottom">
-                                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: conf.color || '#000', flexShrink: 0 }}>
+                                  <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: status.color, flexShrink: 0 }}>
                                       <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
                                   </div>
                                   <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.name}</h6>
+                                  <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>
                               </div>
+                                );
+                              })()}
                               <div className="popup-body custom-scrollbar" style={{ fontSize: '11px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Tipe</span><span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
+                                  <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span><span className={`badge ${getMapEntityStatus(entity, 'node', { hasOnlineUser }).badgeClass}`}>{getMapEntityStatus(entity, 'node', { hasOnlineUser }).label}</span></div>
                                   {entity.description && <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Deskripsi</span><strong className="text-wrap d-block" style={{ maxHeight: '60px', overflowY: 'auto' }}>{entity.description}</strong></div>}
 
                                   {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
@@ -968,7 +975,7 @@ export default function TechnicianDashboard({
           )}
       </Popup>
     );
-  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setActiveGroupDetailNode, setLightbox, setPortDetailNode]);
+  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setActiveGroupDetailNode, setLightbox, setPortDetailNode, hasOnlineUser]);
 
   const renderGroupedClientPopup = useCallback((group, index) => {
     const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
@@ -1099,6 +1106,7 @@ export default function TechnicianDashboard({
           return pOltName === currentOltName;
         })
         .sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+      const status = getMapEntityStatus(entity, 'oltPort', { routers });
 
       return (
         <Popup key={popupKey} minWidth={280} autoPan={false}
@@ -1108,17 +1116,21 @@ export default function TechnicianDashboard({
           {/* header */}
           <div className="popup-header d-flex align-items-center gap-2">
             <div className="rounded-circle d-flex align-items-center justify-content-center text-white"
-              style={{ width: 28, height: 28, background: conf.color || '#000', flexShrink: 0 }}>
+              style={{ width: 28, height: 28, background: status.color, flexShrink: 0 }}>
               <i className={`bi ${conf.icon}`} style={{ fontSize: 14 }}></i>
             </div>
             <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: 14 }}>
               {currentOltName}
             </h6>
+            <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: 10 }}>{status.label}</span>
           </div>
           {/* body */}
           <div className="popup-body mt-2" style={{ fontSize: 12 }}>
             <div className="mb-2 pb-2 border-bottom">
               <span className="text-muted">OLT Device:</span> <strong>{currentOltName}</strong>
+              <div className="mt-1">
+                <span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span>
+              </div>
             </div>
             <div style={{ maxHeight: 200, overflowY: 'auto' }} className="custom-scrollbar">
               {siblingPorts.length === 0 ? (
@@ -1136,6 +1148,9 @@ export default function TechnicianDashboard({
                     <div className="d-flex align-items-center gap-1 mb-1">
                       <span className={`fw-bold ${isSelected ? 'text-primary' : 'text-body-emphasis'}`}>
                         Port {port.portNumber != null ? port.portNumber : (port.port ? port.port.replace('PON ', '') : '—')}
+                      </span>
+                      <span className={`badge ${getMapEntityStatus(port, 'oltPort', { routers }).badgeClass}`} style={{ fontSize: 8 }}>
+                        {getMapEntityStatus(port, 'oltPort', { routers }).label}
                       </span>
                       {isSelected && <span className="badge bg-primary ms-1" style={{ fontSize: 8 }}>Dipilih</span>}
                     </div>
@@ -1180,21 +1195,23 @@ export default function TechnicianDashboard({
     // ── ALL OTHER TYPES: gate on activePopup (original behaviour) ───────────
     const isOpen = activePopup?.id === entity.id && activePopup?.type === type;
     const popupKey = `entity-${entity.id}-${type}`;
+    const status = getMapEntityStatus(entity, type, { routers, hasOnlineUser });
 
     return (
         <Popup key={popupKey} minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(prev => (prev?.id === entity.id && prev?.type === type) ? null : prev) }}>
             {isOpen ? (
                 <>
                     <div className="popup-header d-flex align-items-center gap-2">
-                        <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: conf.color || '#000', flexShrink: 0 }}>
+                        <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: status.color, flexShrink: 0 }}>
                             <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
                         </div>
                         <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
+                        <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>
                     </div>
                     <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
                         {type === 'router' && (
                             <>
-                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                                 <div className="mb-1"><span className="text-muted">IP Address:</span> <strong>{entity.host || '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Port:</span> <strong>{entity.port || 8728}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Last Seen:</span> <strong>{entity.lastSeen ? new Date(entity.lastSeen).toLocaleString('id-ID') : '—'}</strong></div>
@@ -1212,6 +1229,7 @@ export default function TechnicianDashboard({
                         {type === 'node' && (
                             <>
                                 <div className="mb-1"><span className="text-muted">Tipe:</span> <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
+                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                                 {entity.description && <div className="mb-1 text-muted text-truncate" style={{ maxWidth: '230px' }} title={entity.description}>{entity.description}</div>}
                                 <button
                                     className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
@@ -1231,7 +1249,7 @@ export default function TechnicianDashboard({
                                     <span className="text-muted">Traffic:</span>
                                     <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
                                 </div>
-                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
+                                <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                             </>
                         )}
 
@@ -1279,7 +1297,7 @@ export default function TechnicianDashboard({
             )}
         </Popup>
     );
-  }, [isDarkMode, setActivePopup, setLightbox, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick, setPortDetailNode]);
+  }, [isDarkMode, setActivePopup, setLightbox, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick, setPortDetailNode, routers, hasOnlineUser]);
 
 
 
@@ -1297,7 +1315,7 @@ export default function TechnicianDashboard({
             <MemoizedMarker 
                 key={`router-${router.id}`} 
                 position={[Number(router.latitude), Number(router.longitude)]} 
-                icon={createCustomIcon(MARKER_CONFIG.router.color, MARKER_CONFIG.router.icon, !router.isOnline, 'router')} 
+                icon={createCustomIcon(getMapEntityStatus(router, 'router').color, MARKER_CONFIG.router.icon, !getMapEntityStatus(router, 'router').isOnline, 'router')} 
                 onClick={() => handleMarkerClick(router, 'router')}
                 isOpen={isOpen}
                 renderPopup={() => renderEntityPopup(router, 'router')}
@@ -1320,12 +1338,13 @@ export default function TechnicianDashboard({
             ports.sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
             const activePort = ports.find(p => Number(p.id) === Number(activePopup?.id) && activePopup?.type === 'oltPort') || ports[0];
             const isOpen = ports.some(p => Number(p.id) === Number(activePopup?.id) && activePopup?.type === 'oltPort');
+            const status = getMapEntityStatus(activePort, 'oltPort', { routers });
             
             infraMarkers.push(
                 <MemoizedMarker 
                     key={`olt-group-${key}`} 
                     position={[Number(activePort.latitude), Number(activePort.longitude)]} 
-                    icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon, false, 'olt')} 
+                    icon={createCustomIcon(status.color, MARKER_CONFIG.oltPort.icon, !status.isOnline, 'olt')} 
                     onClick={() => handleMarkerClick(activePort, 'oltPort')}
                     isOpen={isOpen}
                     renderPopup={() => renderEntityPopup(activePort, 'oltPort')}
@@ -1338,24 +1357,22 @@ export default function TechnicianDashboard({
             if (group.length === 1) {
                 const node = group[0];
                 const config = node.type === 'ODP' ? MARKER_CONFIG.ODP : MARKER_CONFIG.ODC;
-                const anyUser = hasAnyUser(node.id);
-                const isFaulty = anyUser && !hasOnlineUser(node.id);
-                const markerColor = isFaulty ? '#ef4444' : config.color;
+                const status = getMapEntityStatus(node, 'node', { hasOnlineUser });
 
                 const isOpen = activePopup?.id === node.id && activePopup?.type === 'node';
                 infraMarkers.push(
                     <MemoizedMarker 
                         key={`node-${node.id}`} 
                         position={[Number(node.latitude), Number(node.longitude)]} 
-                        icon={createCustomIcon(markerColor, config.icon, isFaulty, 'node')} 
+                        icon={createCustomIcon(status.isOnline ? config.color : status.color, config.icon, !status.isOnline, 'node')} 
                         onClick={() => handleMarkerClick(node, 'node')}
                         isOpen={isOpen}
                         renderPopup={() => renderEntityPopup(node, 'node')}
                     />
                 );
             } else {
-                const anyFaulty = group.some(n => hasAnyUser(n.id) && !hasOnlineUser(n.id));
-                const groupIcon = getGroupIcon(group.length, anyFaulty);
+                const anyOffline = group.some(n => !getMapEntityStatus(n, 'node', { hasOnlineUser }).isOnline);
+                const groupIcon = getGroupIcon(group.length, anyOffline);
                 
                 const isOpen = activePopup?.id === index && activePopup?.type === 'group';
                 infraMarkers.push(
@@ -1418,7 +1435,7 @@ export default function TechnicianDashboard({
         {clientMarkers}
       </>
     );
-  }, [isDeferredReady, showNodes, routers, visibleBounds, activePopup, filteredOltPorts, groupedNodes, hasAnyUser, hasOnlineUser, handleMarkerClick, handleGroupMarkerClick, shouldShowClients, groupedUsers, handleGroupClientMarkerClick, renderEntityPopup, renderGroupedEntityPopup, renderGroupedClientPopup]);
+  }, [isDeferredReady, showNodes, routers, visibleBounds, activePopup, filteredOltPorts, groupedNodes, hasOnlineUser, handleMarkerClick, handleGroupMarkerClick, shouldShowClients, groupedUsers, handleGroupClientMarkerClick, renderEntityPopup, renderGroupedEntityPopup, renderGroupedClientPopup]);
 
   const activeRouters = routers.filter(r => r.isOnline).length;
   const totalRouters = routers.length;
