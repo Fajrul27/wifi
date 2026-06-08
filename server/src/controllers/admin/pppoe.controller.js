@@ -307,7 +307,7 @@ controller.getUsers =
 
         let downtime = null;
         if (!active) {
-          const baseTime = u.lastSeen || u.createdAt;
+          const baseTime = u.lastDisconnect || u.lastSeen || u.createdAt;
           if (baseTime) {
             const diff = Date.now() - new Date(baseTime).getTime();
             downtime = formatDuration(diff);
@@ -357,6 +357,8 @@ controller.getUsers =
 
           lastSeen:
             u.lastSeen,
+          lastDisconnect:
+            u.lastDisconnect,
 
           latitude:
             u.latitude ??
@@ -757,6 +759,14 @@ controller.updateUser = async (req, res) => {
     if (req.body.profile !== undefined) dbUpdateData.profile = req.body.profile;
     if (req.body["local-address"] !== undefined) dbUpdateData.localAddress = req.body["local-address"] || null;
     if (req.body["remote-address"] !== undefined) dbUpdateData.remoteAddress = req.body["remote-address"] || null;
+    if (req.body.disabled === true) {
+      const offlineAt = new Date();
+      dbUpdateData.isOnline = false;
+      dbUpdateData.localAddress = null;
+      dbUpdateData.remoteAddress = null;
+      dbUpdateData.lastSeen = offlineAt;
+      dbUpdateData.lastDisconnect = offlineAt;
+    }
     
     // Info Lapangan
     if (req.body.whatsapp !== undefined) dbUpdateData.whatsapp = req.body.whatsapp || null;

@@ -217,7 +217,8 @@ export default function PppoeDashboard() {
     setSelectedRouter,
     routers,
     isRouterLocked,
-    setIsRouterLocked
+    setIsRouterLocked,
+    setPppoeUsers
   } = useGlobalRealtime();
 
   /* ───────────────── PAGINATION STATE ───────────────── */
@@ -352,6 +353,26 @@ export default function PppoeDashboard() {
     setActionLoading(prev => ({ ...prev, [key]: true }));
     
     try {
+      const changedAt = new Date().toISOString();
+      setPppoeUsers((prev) => prev.map((item) => {
+        if (String(item.username) !== String(username)) return item;
+        return {
+          ...item,
+          disabled: nextDisabled,
+          isOnline: nextDisabled ? false : item.isOnline,
+          ip: nextDisabled ? null : item.ip,
+          remoteAddress: nextDisabled ? null : item.remoteAddress,
+          localAddress: nextDisabled ? null : item.localAddress,
+          uptime: nextDisabled ? null : item.uptime,
+          downtime: nextDisabled ? "0s" : null,
+          lastSeen: nextDisabled ? changedAt : item.lastSeen,
+          lastDisconnect: nextDisabled ? changedAt : item.lastDisconnect,
+          realtimeUpdatedAt: Date.now(),
+          rx: nextDisabled ? 0 : item.rx,
+          tx: nextDisabled ? 0 : item.tx,
+        };
+      }));
+
       const res = await api.put(`/pppoe/${selectedRouter}/user/${username}`, { disabled: nextDisabled });
       
       if (!res.data?.success) {
@@ -366,11 +387,12 @@ export default function PppoeDashboard() {
       await new Promise((resolve) => setTimeout(resolve, 1500));
     } catch (err) {
       console.error(err);
+      await loadUsers(selectedRouter);
       alert(err.response?.data?.message || err.message || "Failed to toggle status");
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [selectedRouter, loadUsers, triggerRowAnimation]);
+  }, [selectedRouter, loadUsers, triggerRowAnimation, setPppoeUsers]);
 
   /* ───────────────── RECONNECT SESSION HANDLER ───────────────── */
   const handleReconnectUser = useCallback(async (user) => {
@@ -827,6 +849,7 @@ export default function PppoeDashboard() {
           <EditSecret
             show={showEditModal}
             username={editingUser.username}
+            initialUser={editingUser}
             routerId={selectedRouter}
             onClose={() => {
               setShowEditModal(false);

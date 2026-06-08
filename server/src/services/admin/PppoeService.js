@@ -857,6 +857,7 @@ class PppoeService {
               profile: true,
               isOnline: true,
               lastSeen: true,
+              lastDisconnect: true,
               createdAt: true,
               localAddress: true,
               remoteAddress: true,
@@ -920,6 +921,7 @@ class PppoeService {
               const localAddress = active?.address || null;
               const remoteAddress = active?.address || null;
               const updatedLastSeen = isOnline ? new Date() : user.lastSeen;
+              const updatedLastDisconnect = (!isOnline && user.isOnline) ? new Date() : user.lastDisconnect;
 
               const needsDbUpdate =
                 user.isOnline !== isOnline ||
@@ -934,20 +936,22 @@ class PppoeService {
                   isOnline,
                   localAddress,
                   remoteAddress,
-                  lastSeen: updatedLastSeen
+                  lastSeen: updatedLastSeen,
+                  lastDisconnect: updatedLastDisconnect
                 });
                 dbUser = {
                   ...user,
                   isOnline,
                   localAddress,
                   remoteAddress,
-                  lastSeen: updatedLastSeen
+                  lastSeen: updatedLastSeen,
+                  lastDisconnect: updatedLastDisconnect
                 };
               }
 
               let downtime = null;
               if (!isOnline) {
-                const baseTime = dbUser.lastSeen || dbUser.createdAt;
+                const baseTime = dbUser.lastDisconnect || dbUser.lastSeen || dbUser.createdAt;
                 if (baseTime) {
                   const diff = Date.now() - new Date(baseTime).getTime();
                   downtime = formatDuration(diff);
@@ -964,6 +968,7 @@ class PppoeService {
                 uptime: active?.uptime || null,
                 downtime,
                 lastSeen: dbUser.lastSeen,
+                lastDisconnect: dbUser.lastDisconnect,
                 rxBps: rx,
                 txBps: tx,
                 rxHuman: formatBandwidth(rx),
@@ -1037,6 +1042,7 @@ class PppoeService {
                 localAddress: u.localAddress,
                 remoteAddress: u.remoteAddress,
                 lastSeen: u.lastSeen,
+                lastDisconnect: u.lastDisconnect,
               },
             })
           );

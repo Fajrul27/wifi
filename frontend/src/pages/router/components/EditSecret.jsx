@@ -8,6 +8,7 @@ export default function EditSecret({
   onClose,
   routerId,
   username,
+  initialUser = null,
   onSaved,
 }) {
   /* =========================
@@ -35,25 +36,46 @@ export default function EditSecret({
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const applyUserData = (data = {}) => {
+    setName(data.name || data.username || username || "");
+    setEnabled(data.disabled !== "yes" && data.disabled !== "true" && data.disabled !== true);
+    setComment(data.comment || "");
+    setPassword(data.password || "");
+    setService(data.service || "pppoe");
+    setProfile(data.profile || "");
+    setCallerId(data["caller-id"] || data.callerId || "");
+    setLocalAddress(data["local-address"] || data.localAddress || "");
+    setRemoteAddress(data["remote-address"] || data.remoteAddress || "");
+    setRoutes(data.routes || "");
+    setLimitBytesIn(data["limit-bytes-in"] || data.limitBytesIn || "");
+    setLimitBytesOut(data["limit-bytes-out"] || data.limitBytesOut || "");
+    setOnlyOne(data["only-one"] === "yes" || data["only-one"] === "true" || data["only-one"] === true || data.onlyOne === true);
+    setRateLimit(data["rate-limit"] || data.rateLimit || "");
+    setAddressList(data["address-list"] || data.addressList || "");
+    setRemoteIpv6PrefixPool(data["remote-ipv6-prefix-pool"] || data.remoteIpv6PrefixPool || "");
+  };
+
   /* =========================
      LOAD PROFILES AND SECRET
   ========================= */
   useEffect(() => {
     if (!show || !routerId || !username) return;
 
+    applyUserData(initialUser || { username });
+
     const loadData = async () => {
       try {
         setLoadingData(true);
         setLoadingProfiles(true);
 
-        // Fetch Profiles
-        const profRes = await api.get(`/pppoe/${routerId}/profiles`);
-        const profJson = profRes.data;
-        const profData = profJson.data || [];
+        const [profRes, secretRes] = await Promise.all([
+          api.get(`/pppoe/${routerId}/profiles`),
+          api.get(`/pppoe/${routerId}/user/${username}`),
+        ]);
+
+        const profData = profRes.data?.data || [];
         setProfiles(profData);
 
-        // Fetch Secret Detail
-        const secretRes = await api.get(`/pppoe/${routerId}/user/${username}`);
         const secretJson = secretRes.data;
         
         if (!secretJson.success) {
@@ -61,29 +83,11 @@ export default function EditSecret({
         }
 
         const data = secretJson.data || {};
-        
-        // Map data to state
-        setName(data.name || username || "");
-        setEnabled(data.disabled !== "yes" && data.disabled !== "true" && data.disabled !== true);
-        setComment(data.comment || "");
-        setPassword(data.password || "");
-        setService(data.service || "pppoe");
-        setProfile(data.profile || "");
-        setCallerId(data["caller-id"] || "");
-        setLocalAddress(data["local-address"] || "");
-        setRemoteAddress(data["remote-address"] || "");
-        setRoutes(data.routes || "");
-        setLimitBytesIn(data["limit-bytes-in"] || "");
-        setLimitBytesOut(data["limit-bytes-out"] || "");
-        setOnlyOne(data["only-one"] === "yes" || data["only-one"] === "true" || data["only-one"] === true);
-        setRateLimit(data["rate-limit"] || "");
-        setAddressList(data["address-list"] || "");
-        setRemoteIpv6PrefixPool(data["remote-ipv6-prefix-pool"] || "");
+        applyUserData(data);
 
       } catch (err) {
         console.error(err);
-        alert(err.message || "Gagal load data");
-        onClose();
+        alert(err.message || "Gagal load data lengkap. Form tetap bisa diedit dari data terakhir.");
       } finally {
         setLoadingData(false);
         setLoadingProfiles(false);
@@ -172,8 +176,13 @@ export default function EditSecret({
           <div
             className="d-flex justify-content-between align-items-center px-3 py-2 bg-body-tertiary border-bottom"
           >
-            <div className="fw-semibold text-body-emphasis">
-              Edit PPP Secret: {username}
+            <div className="fw-semibold text-body-emphasis d-flex align-items-center gap-2">
+              <span>Edit PPP Secret: {username}</span>
+              {loadingData && (
+                <span className="badge bg-secondary-subtle text-secondary-emphasis fw-medium">
+                  Sinkron detail...
+                </span>
+              )}
             </div>
             <button
               type="button"
@@ -184,13 +193,7 @@ export default function EditSecret({
           </div>
 
           {/* BODY */}
-          {loadingData ? (
-            <div className="p-4 text-center bg-body">
-              <span className="spinner-border spinner-border-sm text-secondary me-2"></span>
-              Loading secret details...
-            </div>
-          ) : (
-            <div className="p-3 bg-body">
+          <div className="p-3 bg-body">
               {/* NAME */}
               <div className="row mb-2 align-items-center">
                 <label className="col-4 text-end pe-2">Name</label>
@@ -385,8 +388,7 @@ export default function EditSecret({
                   />
                 </div>
               </div>
-            </div>
-          )}
+          </div>
 
           {/* FOOTER */}
           <div
@@ -395,13 +397,13 @@ export default function EditSecret({
             <button
               className="btn btn-sm btn-light"
               onClick={onClose}
-              disabled={saving || loadingData}
+              disabled={saving}
             >
               Cancel
             </button>
             <button
               className="btn btn-sm btn-primary"
-              disabled={saving || loadingData}
+              disabled={saving}
               onClick={handleSave}
             >
               {saving ? "Saving..." : "OK"}
