@@ -5,6 +5,55 @@ import { socket } from "../services/socket";
 
 const GlobalRealtimeContext = createContext(null);
 
+const hasRouteCoordinates = (value) => {
+  if (!value) return false;
+  if (Array.isArray(value)) return value.length >= 2;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.length >= 2;
+    } catch {
+      return false;
+    }
+  }
+  return Array.isArray(value?.coordinates) && value.coordinates.length >= 2;
+};
+
+const mergeWithExistingRoutes = (incoming = [], existing = []) => {
+  const existingMap = new Map(existing.map((item) => [`${item.type || ""}:${item.id}`, item]));
+
+  return incoming.map((item) => {
+    const key = `${item.type || ""}:${item.id}`;
+    const old = existingMap.get(key) || existing.find((x) => Number(x.id) === Number(item.id));
+
+    if (!hasRouteCoordinates(item.roadCoordinates) && hasRouteCoordinates(old?.roadCoordinates)) {
+      return {
+        ...item,
+        roadCoordinates: old.roadCoordinates,
+      };
+    }
+
+    return item;
+  });
+};
+
+const clearDashboardSessionCache = () => {
+  try {
+    Object.keys(sessionStorage).forEach((key) => {
+      if (
+        key === "last_selected_router_id" ||
+        key === "dashboard_cache_time" ||
+        key === "dashboard_cache_base" ||
+        key.startsWith("dashboard_cache_router_") ||
+        key.startsWith("dashboard_map_center_") ||
+        key.startsWith("dashboard_map_zoom_")
+      ) {
+        sessionStorage.removeItem(key);
+      }
+    });
+  } catch {}
+};
+
 /* ─────────────────────────────
    SAFE NUMBER
 ───────────────────────────── */
@@ -231,6 +280,7 @@ export function GlobalRealtimeProvider({ children }) {
   useEffect(() => {
     if (isLoginPage) {
       // Clear data and state on login page (e.g. on logout)
+      clearDashboardSessionCache();
       setIsInitialized(false);
       setIsBaseFetched(false);
       setRouters([]);
@@ -440,15 +490,16 @@ export function GlobalRealtimeProvider({ children }) {
     if (isLoginPage) return;
     const handleTopologyStatus = (data) => {
       if (data?.nodes) {
-        setNodes(data.nodes);
+        setNodes((prev) => mergeWithExistingRoutes(data.nodes, prev));
       }
       if (data?.oltPorts) {
-        if (selectedRouter) {
+        setOltPorts((prev) => {
+          const merged = mergeWithExistingRoutes(data.oltPorts, prev);
+          if (!selectedRouter) return merged;
+
           const routerIdNum = Number(selectedRouter);
-          setOltPorts(data.oltPorts.filter(p => p.routerId === routerIdNum));
-        } else {
-          setOltPorts(data.oltPorts);
-        }
+          return merged.filter((p) => Number(p.routerId) === routerIdNum);
+        });
       }
     };
 
