@@ -104,15 +104,41 @@ export const sanitizeCoordinates = (coords) => {
 
 export const buildCableCoordinates = (routeCoords, startLat, startLng, endLat, endLng) => {
   const routed = sanitizeCoordinates(routeCoords);
-  if (routed) return routed;
-
   if (!isValidCoord(startLat, startLng) || !isValidCoord(endLat, endLng)) {
     return null;
   }
 
+  const start = [Number(startLat), Number(startLng)];
+  const end = [Number(endLat), Number(endLng)];
+
+  if (routed) {
+    const distanceSq = (a, b) => {
+      const lat = Number(a?.[0]) - Number(b?.[0]);
+      const lng = Number(a?.[1]) - Number(b?.[1]);
+      return (lat * lat) + (lng * lng);
+    };
+
+    const normalized = [...routed];
+    const first = normalized[0];
+    const last = normalized[normalized.length - 1];
+
+    if (distanceSq(first, end) + distanceSq(last, start) < distanceSq(first, start) + distanceSq(last, end)) {
+      normalized.reverse();
+    }
+
+    if (distanceSq(normalized[0], start) > 0.0000000001) {
+      normalized.unshift(start);
+    }
+    if (distanceSq(normalized[normalized.length - 1], end) > 0.0000000001) {
+      normalized.push(end);
+    }
+
+    return normalized;
+  }
+
   return [
-    [Number(startLat), Number(startLng)],
-    [Number(endLat), Number(endLng)],
+    start,
+    end,
   ];
 };
 

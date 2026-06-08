@@ -303,7 +303,7 @@ export function GlobalRealtimeProvider({ children }) {
         const data = JSON.parse(cached);
         if (data.routers?.length > 0) {
           setRouters(data.routers);
-          setNodes(data.nodes || []);
+          setNodes((prev) => mergeWithExistingRoutes(data.nodes || [], prev));
           setEventLogs(
             (data.logs || []).map((l) => ({ ...l, time: new Date(l.time) }))
           );
@@ -340,7 +340,7 @@ export function GlobalRealtimeProvider({ children }) {
         setRouters(loadedRouters);
         setSelectedRouter((prev) => prev || loadedRouters[0].id);
       }
-      if (loadedNodes.length > 0) setNodes(loadedNodes);
+      if (loadedNodes.length > 0) setNodes((prev) => mergeWithExistingRoutes(loadedNodes, prev));
       if (formattedLogs.length > 0) setEventLogs(formattedLogs);
       setIsInitialized(true);
 
@@ -364,7 +364,7 @@ export function GlobalRealtimeProvider({ children }) {
         try {
           const res = await api.get("/olt-ports");
           const loadedOltPorts = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
-          setOltPorts(loadedOltPorts);
+          setOltPorts((prev) => mergeWithExistingRoutes(loadedOltPorts, prev));
         } catch (err) {
           console.error("Failed to load all OLT ports", err);
         }
@@ -380,8 +380,8 @@ export function GlobalRealtimeProvider({ children }) {
       const ts = sessionStorage.getItem(`${cacheKey}_time`);
       if (cached && ts && Date.now() - Number(ts) < 60000) { // 1 min cache
         const data = JSON.parse(cached);
-        setOltPorts(data.oltPorts || []);
-        setPppoeUsers(data.users || []);
+        setOltPorts((prev) => mergeWithExistingRoutes(data.oltPorts || [], prev));
+        setPppoeUsers((prev) => mergeWithExistingRoutes(data.users || [], prev));
         routersTrafficRef.current = {};
       }
     } catch (e) {}
@@ -403,8 +403,8 @@ export function GlobalRealtimeProvider({ children }) {
         const loadedOltPorts = extract(oltRes);
         const loadedUsers = extract(usersRes);
 
-        setOltPorts(loadedOltPorts);
-        setPppoeUsers(loadedUsers);
+        setOltPorts((prev) => mergeWithExistingRoutes(loadedOltPorts, prev));
+        setPppoeUsers((prev) => mergeWithExistingRoutes(loadedUsers, prev));
         routersTrafficRef.current = {};
 
         try {
@@ -476,7 +476,9 @@ export function GlobalRealtimeProvider({ children }) {
             latitude: r.latitude !== undefined ? r.latitude : old.latitude,
             longitude: r.longitude !== undefined ? r.longitude : old.longitude,
             topologyNodeId: r.topologyNodeId !== undefined ? r.topologyNodeId : old.topologyNodeId,
-            roadCoordinates: r.roadCoordinates !== undefined ? r.roadCoordinates : old.roadCoordinates,
+            roadCoordinates: hasRouteCoordinates(r.roadCoordinates)
+              ? r.roadCoordinates
+              : (hasRouteCoordinates(old.roadCoordinates) ? old.roadCoordinates : r.roadCoordinates),
             whatsapp: r.whatsapp !== undefined ? r.whatsapp : old.whatsapp,
             address: r.address !== undefined ? r.address : old.address,
             imagePath: r.imagePath !== undefined ? r.imagePath : old.imagePath,

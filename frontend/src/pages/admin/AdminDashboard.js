@@ -528,38 +528,19 @@ export default function AdminDashboard({
     // Use Number(n.id) as key to avoid string/number type mismatch in production builds
     const nodesMap = new Map(nodes.map(n => [Number(n.id), n]));
 
-    // Group OLT ports by (routerId, oltId) to create one cable per device
-    const routerOltMap = new Map();
     filteredOltPorts.forEach(port => {
       const router = routers.find(r => Number(r.id) === Number(port.routerId));
       if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
-        const key = `${port.routerId}-${port.oltId}`;
-        if (!routerOltMap.has(key)) {
-          routerOltMap.set(key, {
-            router,
-            port,
-            portCount: 1,
-            oltName: port.oltName || port.name?.split(" - Port ")[0] || 'OLT'
-          });
-        } else {
-          routerOltMap.get(key).portCount += 1;
-        }
+        lines.push({
+          id: `router-olt-${port.id}`,
+          coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
+          type: 'router-to-olt',
+          color: '#0ea5e9',
+          weight: 4,
+          animate: true,
+          label: `Router ${router.name} ➔ OLT Port ${port.name}`
+        });
       }
-    });
-
-    // Create one cable per router-OLT combination
-    routerOltMap.forEach(({ router, port, portCount, oltName }) => {
-      lines.push({
-        id: `router-olt-${port.routerId}-${port.oltId}`,
-        coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
-        type: 'router-to-olt',
-        color: '#0ea5e9',
-        weight: 4,
-        animate: true,
-        label: portCount > 1 
-          ? `Router ${router.name} ➔ ${oltName} (${portCount} Ports)` 
-          : `Router ${router.name} ➔ ${oltName}`
-      });
     });
 
     filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
