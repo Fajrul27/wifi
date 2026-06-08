@@ -35,7 +35,7 @@ const menu = {
 
   TEKNISI: [
     { name: "Dashboard", path: "/teknisi", icon: FaHome },
-    { name: "maps", path: "/teknisi/maps", icon: FaHome },
+    { name: "PPPoE Session", path: "/teknisi/pppoe-session", icon: FaHome },
     { name: "Logout", path: "logout", icon: FaSignOutAlt, isLogout: true },
     { name: "Profile", path: "/teknisi/profile" },
     

@@ -4,7 +4,6 @@ import { MapContainer, TileLayer, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "../admin/AdminDashboard.css";
 import L from "leaflet";
-import api from "../../services/api";
 import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates, getMapEntityStatus } from "../admin/utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "../admin/components/DashboardMapComponents";
 import DashboardKpiCards from "../admin/components/DashboardKpiCards";
@@ -12,12 +11,6 @@ import DashboardBandwidthChart from "../admin/components/DashboardBandwidthChart
 import DashboardSystemLogs from "../admin/components/DashboardSystemLogs";
 import NodePortDetailModal from "../admin/components/NodePortDetailModal";
 import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
-import {
-  usePppoeUserMonitor,
-  StatusBadge,
-  ConnectionBadge,
-  formatTraffic,
-} from "../router/components/PppoeUserMonitor";
 
 const canvasRenderer = L.canvas({ padding: 1.0 });
 
@@ -71,125 +64,6 @@ const getClientGroupIcon = (count, anyOnline) => {
   return icon;
 };
 
-// Reusable Action Button
-const ActionButton = ({ icon, title, variant, onClick, disabled, loading, size = "sm" }) => (
-  <button
-    className={`btn btn-outline-${variant} btn-${size} position-relative`}
-    onClick={onClick}
-    disabled={disabled || loading}
-    title={title}
-    style={{ 
-      padding: "4px 8px",
-      minWidth: "32px",
-      transition: "all 0.2s ease",
-      transform: "scale(1)",
-    }}
-    onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.1)"; }}
-    onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-  >
-    {loading ? (
-      <span className="spinner-border spinner-border-sm" role="status" style={{ width: "12px", height: "12px" }}></span>
-    ) : (
-      <i className={`bi bi-${icon}`}></i>
-    )}
-  </button>
-);
-
-// Pagination config
-const ITEMS_PER_PAGE_OPTIONS = [25, 50, 100, 250];
-const DEFAULT_ITEMS_PER_PAGE = 50;
-
-// Pagination Controls Component
-const PaginationControls = ({ currentPage, totalPages, totalItems, itemsPerPage, onPageChange, onItemsPerPageChange }) => {
-  const startItem = (currentPage - 1) * itemsPerPage + 1;
-  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-
-  const generatePageNumbers = () => {
-    const pages = [];
-    const maxVisible = 5;
-    
-    if (totalPages <= maxVisible + 2) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      if (currentPage <= 3) {
-        for (let i = 1; i <= 4; i++) pages.push(i);
-        pages.push('...');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 2) {
-        pages.push(1);
-        pages.push('...');
-        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
-      } else {
-        pages.push(1);
-        pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
-        pages.push('...');
-        pages.push(totalPages);
-      }
-    }
-    return pages;
-  };
-
-  return (
-    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 px-3 bg-light rounded-bottom">
-      <div className="small text-muted">
-        Menampilkan {startItem}-{endItem} dari {totalItems} data
-      </div>
-      
-      <div className="d-flex align-items-center gap-2">
-        <select 
-          className="form-select form-select-sm" 
-          style={{ width: "auto" }}
-          value={itemsPerPage}
-          onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-        >
-          {ITEMS_PER_PAGE_OPTIONS.map(opt => (
-            <option key={opt} value={opt}>{opt} / halaman</option>
-          ))}
-        </select>
-
-        <nav aria-label="Page navigation">
-          <ul className="pagination pagination-sm mb-0">
-            <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
-              <button className="page-link" onClick={() => onPageChange(1)} disabled={currentPage === 1}>
-                <i className="bi bi-chevron-double-left"></i>
-              </button>
-            </li>
-            <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
-              <button className="page-link" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1}>
-                <i className="bi bi-chevron-left"></i>
-              </button>
-            </li>
-            
-            {generatePageNumbers().map((page, idx) => (
-              page === '...' ? (
-                <li key={`ellipsis-${idx}`} className="page-item disabled">
-                  <span className="page-link">...</span>
-                </li>
-              ) : (
-                <li key={page} className={`page-item ${currentPage === page ? "active" : ""}`}>
-                  <button className="page-link" onClick={() => onPageChange(page)}>{page}</button>
-                </li>
-              )
-            ))}
-            
-            <li className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}>
-              <button className="page-link" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages}>
-                <i className="bi bi-chevron-right"></i>
-              </button>
-            </li>
-            <li className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}>
-              <button className="page-link" onClick={() => onPageChange(totalPages)} disabled={currentPage === totalPages}>
-                <i className="bi bi-chevron-double-right"></i>
-              </button>
-            </li>
-          </ul>
-        </nav>
-      </div>
-    </div>
-  );
-};
-
 export default function TechnicianDashboard({
   routers: propRouters = [],
   oltPorts: propOltPorts = [],
@@ -227,10 +101,7 @@ export default function TechnicianDashboard({
     setSelectedRouter: ctxSetSelectedRouter,
     isRouterLocked,
     setIsRouterLocked,
-    routersTrafficRef: ctxRoutersTrafficRef,
-    monitorSocketConnected,
-    isRouterConnected,
-    metrics
+    routersTrafficRef: ctxRoutersTrafficRef
   } = useGlobalRealtime();
 
   const [mapType, setMapType] = useState(() => {
@@ -301,10 +172,6 @@ export default function TechnicianDashboard({
   const [activeGroupDetailNode, setActiveGroupDetailNode] = useState(null);
   const [activeGroupDetailClient, setActiveGroupDetailClient] = useState(null);
   const [customAlert, setCustomAlert] = useState({ show: false, title: "", message: "", type: "info" });
-
-  const showAlert = useCallback((message, title = "Notifikasi", type = "info") => {
-    setCustomAlert({ show: true, title, message, type });
-  }, []);
 
   useEffect(() => {
     if (!lightbox.isOpen) return;
@@ -1032,10 +899,6 @@ export default function TechnicianDashboard({
                                   {entity.isOnline && entity.uptime && (
                                       <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
                                   )}
-                                  <div className="mb-2">
-                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Traffic Rate</span>
-                                      <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
-                                  </div>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
 
                                   {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
@@ -1247,10 +1110,6 @@ export default function TechnicianDashboard({
                                 <div className="mb-1"><span className="text-muted">Profile:</span> <strong>{entity.profile || '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">IP:</span> <strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
                                 {entity.isOnline && entity.uptime && <div className="mb-1"><span className="text-muted">Uptime:</span> <strong>{entity.uptime}</strong></div>}
-                                <div className="mb-1">
-                                    <span className="text-muted">Traffic:</span>
-                                    <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
-                                </div>
                                 <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                             </>
                         )}
@@ -1479,96 +1338,6 @@ export default function TechnicianDashboard({
     ));
   }, [visibleConnections, activePopup, handleCableClick]);
 
-
-  /* ───────────────── PPPoE USER MONITOR STATE & HOOK ───────────────── */
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
-
-  const {
-    usersLoading,
-    loadUsers,
-    filteredUsers: pppoeFilteredUsers,
-    onlineUsers: pppoeOnlineUsers,
-    searchQuery,
-    setSearchQuery,
-    filterStatus,
-    setFilterStatus,
-    locationFilter,
-    setLocationFilter,
-    sortBy,
-    setSortBy,
-  } = usePppoeUserMonitor(selectedRouter);
-
-  const [actionLoading, setActionLoading] = useState({});
-  const [animatingRows, setAnimatingRows] = useState({});
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [selectedRouter, searchQuery, filterStatus, locationFilter, sortBy]);
-
-  const handleSync = async () => {
-    if (!selectedRouter) return;
-    try {
-      await api.post(`/pppoe/${selectedRouter}/sync`);
-      await loadUsers(selectedRouter);
-    } catch (err) {
-      console.error(err);
-      showAlert(err.response?.data?.message || "Sync failed", "Sync Gagal", "danger");
-    }
-  };
-
-  const triggerRowAnimation = useCallback((userId) => {
-    setAnimatingRows(prev => ({ ...prev, [userId]: true }));
-    setTimeout(() => setAnimatingRows(prev => ({ ...prev, [userId]: false })), 600);
-  }, []);
-
-  const handleReconnectUser = useCallback(async (user) => {
-    if (!selectedRouter) return;
-    const username = user.username;
-    const key = `reconnect-${username}`;
-    
-    setActionLoading(prev => ({ ...prev, [key]: true }));
-    try {
-      const res = await api.post(`/pppoe/${selectedRouter}/user/${username}/kick`);
-      if (!res.data?.success) {
-        throw new Error(res.data?.message || "Failed to reconnect session");
-      }
-      triggerRowAnimation(username);
-      await loadUsers(selectedRouter);
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    } catch (err) {
-      console.error(err);
-      showAlert(err.response?.data?.message || err.message || "Failed to reconnect user session", "Gagal Reconnect", "danger");
-    } finally {
-      setActionLoading(prev => ({ ...prev, [key]: false }));
-    }
-  }, [selectedRouter, loadUsers, triggerRowAnimation, showAlert]);
-
-  const paginatedUsers = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return pppoeFilteredUsers.slice(startIndex, startIndex + itemsPerPage);
-  }, [pppoeFilteredUsers, currentPage, itemsPerPage]);
-
-  const totalPages = useMemo(() => {
-    return Math.ceil(pppoeFilteredUsers.length / itemsPerPage) || 1;
-  }, [pppoeFilteredUsers.length, itemsPerPage]);
-
-  // PPPoE Metrics
-  const latest = metrics?.latest || {};
-  const cpu = safeNumber(latest.cpu);
-  const ram = safeNumber(latest.ram);
-  const rx = safeNumber(latest.rx ?? latest.rxBps ?? latest.rxRaw);
-  const tx = safeNumber(latest.tx ?? latest.txBps ?? latest.txRaw);
-
-  function safeNumber(v) {
-    return isNaN(Number(v)) ? 0 : Number(v);
-  }
-  function formatPercent(v) {
-    return `${safeNumber(v).toFixed(1)}%`;
-  }
-
-  const pppoeOfflineCount = pppoeFilteredUsers.length - pppoeOnlineUsers;
-  const pppoeLocatedCount = pppoeFilteredUsers.filter((u) => u.latitude && u.longitude).length;
 
   return (
     <>
@@ -1872,285 +1641,6 @@ export default function TechnicianDashboard({
               <DashboardBandwidthChart routersTrafficRef={routersTrafficRef} isDarkMode={isDarkMode} selectedRouter={selectedRouter} />
               <DashboardSystemLogs eventLogs={eventLogs} />
             </div>
-          </div>
-
-        </div>
-
-        {/* ========================================================= */}
-        {/* PPPoE USER SESSIONS LIST SECTION                          */}
-        {/* ========================================================= */}
-        <div className="mt-2 mb-4">
-          
-          {/* HEADER */}
-          <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-            <div>
-              <h3 className="fw-bold mb-1 text-body-emphasis">
-                <i className="bi bi-router me-2 text-primary"></i>PPPoE Sessions
-              </h3>
-              <p className="text-muted mb-0 small">Monitor user connections active on the selected router</p>
-            </div>
-            <div className="d-flex align-items-center gap-2">
-              <ConnectionBadge connected={monitorSocketConnected && isRouterConnected} />
-              <button
-                className="btn btn-warning btn-sm d-flex align-items-center gap-2 btn-hover-scale"
-                onClick={handleSync}
-              >
-                <i className="bi bi-arrow-clockwise"></i>
-                <span className="d-none d-sm-inline">Sync</span>
-              </button>
-            </div>
-          </div>
-
-          {/* CONTROL BAR */}
-          <div className="card border-0 shadow-sm mb-3 rounded-4">
-            <div className="card-body py-3">
-              <div className="row g-2 align-items-end">
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Search</label>
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Username..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Status</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                  >
-                    <option value="all">All</option>
-                    <option value="online">Online</option>
-                    <option value="offline">Offline</option>
-                  </select>
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Location</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={locationFilter}
-                    onChange={(e) => setLocationFilter(e.target.value)}
-                  >
-                    <option value="all">All</option>
-                    <option value="has-location">📍 Has Location</option>
-                    <option value="no-location">❌ No Location</option>
-                  </select>
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Sort By</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                  >
-                    <option value="name-asc">Name ↑</option>
-                    <option value="name-desc">Name ↓</option>
-                    <option value="uptime-desc">Uptime ↓</option>
-                    <option value="uptime-asc">Uptime ↑</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ROUTER METRICS */}
-          <div className="row g-3 mb-4">
-            {["CPU Load", "RAM Usage", "RX Traffic", "TX Traffic"].map((label, idx) => {
-              const values = [cpu, ram, rx, tx];
-              const colors = ["text-danger", "text-warning", "text-success", "text-primary"];
-              const format = idx < 2 ? formatPercent : formatTraffic;
-              return (
-                <div className="col-6 col-md-3" key={label}>
-                  <div className="card border-0 shadow-sm h-100 rounded-4">
-                    <div className="card-body py-3">
-                      <div className="small text-muted text-uppercase fw-semibold mb-1">{label}</div>
-                      <div className={`fs-4 fw-bold ${colors[idx]}`}>{format(values[idx])}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* USERS TABLE WITH PAGINATION */}
-          <div className="card border-0 shadow-sm rounded-4 overflow-hidden">
-            <div className="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-              <h5 className="mb-0 fw-semibold text-body-emphasis">
-                <i className="bi bi-people me-2"></i>User Sessions
-                <span className="badge bg-secondary ms-2">{pppoeFilteredUsers.length}</span>
-              </h5>
-              <div className="small text-muted">
-                <span className="text-success">{pppoeOnlineUsers} online</span> •{" "}
-                <span className="text-danger">{pppoeOfflineCount} offline</span> •{" "}
-                <span className="text-primary">{pppoeLocatedCount} located</span>
-              </div>
-            </div>
-            
-            {/* Pagination Top */}
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={pppoeFilteredUsers.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(val) => { setItemsPerPage(val); setCurrentPage(1); }}
-            />
-            
-            <div className="table-container">
-              <table className="table table-hover align-middle mb-0">
-                <thead className="table-light sticky-top" style={{ zIndex: 1, background: "#fff" }}>
-                  <tr>
-                    <th style={{ width: "40px" }}>#</th>
-                    <th>User</th>
-                    <th>Status</th>
-                    <th>IP Address</th>
-                    <th>Uptime / Downtime</th>
-                    <th className="text-end">RX</th>
-                    <th className="text-end">TX</th>
-                    <th>Location</th>
-                    <th className="text-end" style={{ width: "80px" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersLoading && !pppoeFilteredUsers.length ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5">
-                        <div className="spinner-border text-primary" role="status">
-                          <span className="visually-hidden">Loading...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : !paginatedUsers.length && pppoeFilteredUsers.length > 0 ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5 text-muted">
-                        <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-                        <p className="mb-0">Halaman kosong. Coba ubah nomor halaman atau filter.</p>
-                      </td>
-                    </tr>
-                  ) : !pppoeFilteredUsers.length ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5 text-muted">
-                        <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-                        <p className="mb-0">No data found matching your filters</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedUsers.map((u, i) => {
-                      const globalIndex = (currentPage - 1) * itemsPerPage + i + 1;
-                      const isAnimating = animatingRows[u.username];
-                      return (
-                        <tr 
-                          key={String(u.id)} 
-                          className={`${u.isOnline ? "" : "opacity-75"} ${isAnimating ? "row-animate" : ""}`}
-                          style={{ transition: "background-color 0.3s ease, opacity 0.3s ease" }}
-                        >
-                          <td>{globalIndex}</td>
-                          <td>
-                            <div className="fw-medium text-body-emphasis">{u.username || "-"}</div>
-                            {u.service && <small className="text-muted d-block">{u.service}</small>}
-                          </td>
-                          <td>
-                            {u.disabled ? (
-                              <span className="badge rounded-pill px-3 py-2 bg-secondary-subtle text-secondary-emphasis">
-                                <i className="bi bi-slash-circle-fill me-1 text-secondary" style={{ fontSize: "0.6rem" }} />
-                                Disabled
-                              </span>
-                            ) : (
-                              <StatusBadge online={u.isOnline} />
-                            )}
-                          </td>
-                          <td>
-                            {(u.ip || u.remoteAddress) ? (
-                              <a
-                                href={`http://${u.ip || u.remoteAddress}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-decoration-none"
-                                title="Open IP in new tab"
-                              >
-                                <code className="small bg-light px-2 py-1 rounded text-primary">
-                                  {u.ip || u.remoteAddress}
-                                </code>
-                              </a>
-                            ) : (
-                              <code className="small bg-light px-2 py-1 rounded text-muted">-</code>
-                            )}
-                          </td>
-                          <td>
-                            {u.isOnline ? (
-                              <div>
-                                <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 small fw-semibold">
-                                  <i className="bi bi-clock-fill me-1" />
-                                  {u.uptime || "-"}
-                                </span>
-                                <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Uptime</span>
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 small fw-semibold">
-                                  <i className="bi bi-clock me-1" />
-                                  {u.downtime || "-"}
-                                </span>
-                                <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Downtime</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="text-end">
-                            <span className="text-success fw-medium">{formatTraffic(u.rx)}</span>
-                          </td>
-                          <td className="text-end">
-                            <span className="text-primary fw-medium">{formatTraffic(u.tx)}</span>
-                          </td>
-                          <td>
-                            {u.latitude && u.longitude ? (
-                              <a
-                                href={`https://maps.google.com/?q=${u.latitude},${u.longitude}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-decoration-none small text-danger fw-medium"
-                                title="Open in Google Maps"
-                              >
-                                <i className="bi bi-geo-alt-fill me-1"></i>
-                                {parseFloat(u.latitude).toFixed(3)}, {parseFloat(u.longitude).toFixed(3)}
-                              </a>
-                            ) : (
-                              <span className="text-muted small">-</span>
-                            )}
-                          </td>
-                          
-                          {/* ACTIONS: Reconnect Session Only */}
-                          <td className="text-end">
-                            <div className="d-flex justify-content-end gap-1">
-                              <ActionButton
-                                icon="arrow-clockwise"
-                                title="Reconnect Session"
-                                variant="info"
-                                disabled={!u.isOnline}
-                                onClick={() => handleReconnectUser(u)}
-                                loading={actionLoading[`reconnect-${u.username}`]}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Pagination Bottom */}
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={pppoeFilteredUsers.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(val) => { setItemsPerPage(val); setCurrentPage(1); }}
-            />
           </div>
 
         </div>

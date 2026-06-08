@@ -21,6 +21,47 @@ const formatPercent = (v) => `${safeNumber(v).toFixed(1)}%`;
 const ITEMS_PER_PAGE_OPTIONS = [25, 50, 100, 250];
 const DEFAULT_ITEMS_PER_PAGE = 50;
 
+const formatDuration = (ms = 0) => {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+};
+
+const parseDuration = (value = "") => {
+  if (!value || value === "-") return 0;
+  const text = String(value);
+  let total = 0;
+  const days = text.match(/(\d+)\s*d/);
+  const hours = text.match(/(\d+)\s*h/);
+  const minutes = text.match(/(\d+)\s*m/);
+  const seconds = text.match(/(\d+)\s*s/);
+  if (days) total += Number(days[1]) * 86400;
+  if (hours) total += Number(hours[1]) * 3600;
+  if (minutes) total += Number(minutes[1]) * 60;
+  if (seconds) total += Number(seconds[1]);
+  return total * 1000;
+};
+
+const getLiveSessionDuration = (user, now) => {
+  if (user?.isOnline) {
+    const baseMs = parseDuration(user.uptime);
+    const elapsedMs = user.realtimeUpdatedAt ? now - Number(user.realtimeUpdatedAt) : 0;
+    return baseMs > 0 ? formatDuration(baseMs + elapsedMs) : (user.uptime || "-");
+  }
+
+  const baseTime = user?.lastDisconnect || user?.lastSeen || user?.createdAt;
+  const baseDate = baseTime ? new Date(baseTime) : null;
+  if (baseDate && !isNaN(baseDate)) return formatDuration(now - baseDate.getTime());
+  return user?.downtime || "-";
+};
+
 // ─────────────────────────────────────────────────────────────
 // REUSABLE COMPONENTS
 // ─────────────────────────────────────────────────────────────
@@ -210,6 +251,7 @@ export default function PppoeDashboard() {
   const [actionLoading, setActionLoading] = useState({});
   const [animatingRows, setAnimatingRows] = useState({});
   const [confirmDelete, setConfirmDelete] = useState({ show: false, user: null });
+  const [liveNow, setLiveNow] = useState(Date.now());
 
   /* ───────────────── ROUTER MONITOR ───────────────── */
   const { loadRouters, metrics, socketConnected, isRouterConnected } = useRouterMonitor(selectedRouter);
@@ -241,6 +283,11 @@ export default function PppoeDashboard() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterStatus, locationFilter, sortBy]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setLiveNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   /* ───────────────── SYNC ───────────────── */
   const handleSync = async () => {
@@ -652,7 +699,7 @@ export default function PppoeDashboard() {
                             <div>
                               <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 small fw-semibold">
                                 <i className="bi bi-clock-fill me-1" />
-                                {u.uptime || "-"}
+                                {getLiveSessionDuration(u, liveNow)}
                               </span>
                               <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Uptime</span>
                             </div>
@@ -660,7 +707,7 @@ export default function PppoeDashboard() {
                             <div>
                               <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 small fw-semibold">
                                 <i className="bi bi-clock me-1" />
-                                {u.downtime || "-"}
+                                {getLiveSessionDuration(u, liveNow)}
                               </span>
                               <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Downtime</span>
                             </div>

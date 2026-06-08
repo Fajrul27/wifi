@@ -4,6 +4,6 @@ const logController = require("../../controllers/admin/log.controller");
 const verifyToken = require("../../Middleware/auth.middleware");
 const roleCheck = require("../../Middleware/role.middleware");
 
-router.get("/", verifyToken, roleCheck(["ADMIN"]), logController.getRecentLogs);
+router.get("/", verifyToken, roleCheck(["ADMIN", "TEKNISI"]), logController.getRecentLogs);
 
 module.exports = router;

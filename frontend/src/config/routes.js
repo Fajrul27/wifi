@@ -88,6 +88,12 @@ const routes = [
     role: teknisiRole,
   },
   {
+    path: "/teknisi/pppoe-session",
+    layout: TeknisiLayout,
+    element: PPPoE,
+    role: teknisiRole,
+  },
+  {
     path: "/teknisi/profile",
     layout: TeknisiLayout,
     element: Profile,

@@ -1078,10 +1078,6 @@ export default function AdminDashboard({
                                   {entity.isOnline && entity.uptime && (
                                       <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Uptime</span><strong>{entity.uptime}</strong></div>
                                   )}
-                                  <div className="mb-2">
-                                      <span className="text-muted d-block" style={{ fontSize: '10px' }}>Traffic Rate</span>
-                                      <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
-                                  </div>
                                   <div className="mb-2"><span className="text-muted d-block" style={{ fontSize: '10px' }}>Status</span><span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
 
                                   {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3 || entity.whatsapp || entity.address) && (
@@ -1308,10 +1304,6 @@ export default function AdminDashboard({
                                 <div className="mb-1"><span className="text-muted">Profile:</span> <strong>{entity.profile || '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">IP:</span> <strong className="font-monospace">{entity.remoteAddress || '—'}</strong></div>
                                 {entity.isOnline && entity.uptime && <div className="mb-1"><span className="text-muted">Uptime:</span> <strong>{entity.uptime}</strong></div>}
-                                <div className="mb-1">
-                                    <span className="text-muted">Traffic:</span>
-                                    <strong>↓ {entity.rxHuman || '0 bps'} / ↑ {entity.txHuman || '0 bps'}</strong>
-                                </div>
                                 <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${status.badgeClass}`}>{status.label}</span></div>
                             </>
                         )}
