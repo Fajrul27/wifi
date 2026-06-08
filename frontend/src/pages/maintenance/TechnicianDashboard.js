@@ -955,7 +955,8 @@ export default function TechnicianDashboard({
                                   <button
                                       className="btn btn-sm btn-primary w-100 mt-2 fw-semibold"
                                       style={{ fontSize: '10px', borderRadius: '6px' }}
-                                      onClick={() => setPortDetailNode(entity)}
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); setPortDetailNode(entity); }}
                                   >
                                       <i className="bi bi-grid-3x3-gap-fill me-1"></i> Detail Port
                                   </button>
@@ -1218,7 +1219,8 @@ export default function TechnicianDashboard({
                                 <div className="mb-1"><span className="text-muted">Total Clients:</span> <strong>{pppoeUsers.filter(u => u.routerId === entity.id).length} ({pppoeUsers.filter(u => u.routerId === entity.id && u.isOnline).length} Online)</strong></div>
                                 <button
                                     className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
-                                    onClick={() => setPortDetailNode({ ...entity, type: 'Router' })}
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); setPortDetailNode({ ...entity, type: 'Router' }); }}
                                     style={{ fontSize: '11px', borderRadius: '6px' }}
                                 >
                                     <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
@@ -1232,7 +1234,8 @@ export default function TechnicianDashboard({
                                 {entity.description && <div className="mb-1 text-muted text-truncate" style={{ maxWidth: '230px' }} title={entity.description}>{entity.description}</div>}
                                 <button
                                     className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
-                                    onClick={() => setPortDetailNode(entity)}
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); setPortDetailNode(entity); }}
                                     style={{ fontSize: '11px', borderRadius: '6px' }}
                                 >
                                     <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
@@ -1665,7 +1668,7 @@ export default function TechnicianDashboard({
 
           <div className="row g-3 flex-grow-1" style={{ minHeight: 0 }}>
             {/* Main Map Section */}
-            <div className={isFullScreen ? "position-fixed top-0 start-0 end-0 bottom-0 bg-white" : "col-lg-9 col-xl-9 h-100"} style={isFullScreen ? { zIndex: 99999, margin: 0, padding: 0 } : {}}>
+            <div className={isFullScreen ? "position-fixed top-0 start-0 end-0 bottom-0 bg-white" : "col-lg-9 col-xl-9 h-100"} style={isFullScreen ? { zIndex: 1040, margin: 0, padding: 0 } : {}}>
               <div className={`card border-0 shadow-sm overflow-hidden position-relative ${isFullScreen ? 'rounded-0 w-100 h-100' : 'rounded-4 h-100'}`}>
                 
                 {/* Map Top UI Overlays */}
