@@ -111,14 +111,14 @@ export function FitMapBounds({ coordinates, selectedRouter }) {
 }
 
 // Optimized connection lines to prevent re-rendering and lag
-export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashArray, label, isPopupOpen, onClick, onPopupClose }) => {
+export const MemoizedPolyline = React.memo(({ coordinates, color, weight, opacity, dashArray, label, isPopupOpen, onClick, onPopupClose }) => {
   const sanitized = React.useMemo(() => sanitizeCoordinates(coordinates), [coordinates]);
   if (!sanitized) return null;
 
   return (
     <Polyline 
       positions={sanitized}
-      pathOptions={{ color, weight, opacity: 0.85, dashArray, lineCap: "round" }}
+      pathOptions={{ color, weight, opacity: opacity ?? 0.85, dashArray, lineCap: "round" }}
       eventHandlers={onClick ? { click: onClick } : undefined}
     >
       {isPopupOpen && (
@@ -131,6 +131,7 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
 }, (prev, next) => {
   if (prev.color !== next.color ||
       prev.weight !== next.weight ||
+      prev.opacity !== next.opacity ||
       prev.dashArray !== next.dashArray ||
       prev.label !== next.label ||
       prev.isPopupOpen !== next.isPopupOpen) {
@@ -154,16 +155,36 @@ export const MemoizedPolyline = React.memo(({ coordinates, color, weight, dashAr
 
 // Optimized marker component to prevent rendering of markers whose positions and statuses have not changed.
 export const MemoizedMarker = React.memo(({ position, icon, onClick, isOpen, renderPopup }) => {
+  const markerRef = useRef(null);
+
+  useEffect(() => {
+    if (markerRef.current) {
+      if (isOpen) {
+        try {
+          markerRef.current.openPopup();
+        } catch (e) {}
+      } else {
+        try {
+          if (markerRef.current.isPopupOpen && markerRef.current.isPopupOpen()) {
+            markerRef.current.closePopup();
+          }
+        } catch (e) {}
+      }
+    }
+  }, [isOpen]);
+
   return (
-    <Marker position={position} icon={icon} eventHandlers={onClick ? { click: onClick } : undefined}>
+    <Marker ref={markerRef} position={position} icon={icon} eventHandlers={onClick ? { click: onClick } : undefined}>
       {renderPopup()}
     </Marker>
   );
 }, (prev, next) => {
   // If the popup is open, we always re-render to display live traffic/data updates
   if (next.isOpen) return false;
-  if (prev.icon !== next.icon) return false;
   if (prev.isOpen !== next.isOpen) return false;
+  // Re-render if renderPopup callback changed (e.g., activePopup state changed)
+  if (prev.renderPopup !== next.renderPopup) return false;
+  if (prev.icon !== next.icon) return false;
   if (prev.position[0] !== next.position[0] || prev.position[1] !== next.position[1]) return false;
   return true;
 });

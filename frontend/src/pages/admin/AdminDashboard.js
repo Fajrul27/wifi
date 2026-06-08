@@ -342,6 +342,60 @@ export default function AdminDashboard({
 
   const shouldShowClients = showClients && (mapZoom >= 18 || usersInViewCount < 50);
 
+  const getClusterThreshold = (zoom) => {
+    if (zoom >= 19) return 0.000005; // ~0.5m (exact overlaps only)
+    if (zoom === 18) return 0.00003;  // ~3m
+    if (zoom === 17) return 0.00008;  // ~8m
+    if (zoom === 16) return 0.0002;   // ~22m
+    if (zoom === 15) return 0.0005;   // ~55m
+    if (zoom === 14) return 0.001;    // ~110m
+    if (zoom === 13) return 0.002;    // ~220m
+    if (zoom === 12) return 0.005;    // ~550m
+    return 0.01; // zoom <= 11
+  };
+
+  const groupedNodes = useMemo(() => {
+    const groupMap = new Map();
+    const threshold = getClusterThreshold(mapZoom);
+
+    filteredNodes.forEach(node => {
+        if (!isValidCoord(node.latitude, node.longitude)) return;
+        
+        // Create a grid key based on threshold for O(1) lookup bucketing
+        const latKey = Math.round(node.latitude / threshold);
+        const lngKey = Math.round(node.longitude / threshold);
+        const key = `${latKey}_${lngKey}`;
+        
+        if (!groupMap.has(key)) {
+            groupMap.set(key, []);
+        }
+        groupMap.get(key).push(node);
+    });
+
+    return Array.from(groupMap.values());
+  }, [filteredNodes, mapZoom]);
+
+  const groupedUsers = useMemo(() => {
+    const groupMap = new Map();
+    const threshold = getClusterThreshold(mapZoom);
+
+    filteredUsers.forEach(user => {
+        if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
+        
+        // Create a grid key based on threshold for O(1) lookup bucketing
+        const latKey = Math.round(user.latitude / threshold);
+        const lngKey = Math.round(user.longitude / threshold);
+        const key = `${latKey}_${lngKey}`;
+        
+        if (!groupMap.has(key)) {
+            groupMap.set(key, []);
+        }
+        groupMap.get(key).push(user);
+    });
+
+    return Array.from(groupMap.values());
+  }, [filteredUsers, mapZoom]);
+
   const searchResults = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term || term.length < 2) return [];
@@ -491,14 +545,42 @@ export default function AdminDashboard({
       if (isValidCoord(port?.latitude, port?.longitude) && isValidCoord(node.latitude, node.longitude)) {
         const anyUser = hasAnyUser(node.id);
         const isOnline = anyUser ? hasOnlineUser(node.id) : true;
+
+        const isOltActive = activePopup?.type === 'oltPort';
+        const activeSiblingPorts = isOltActive ? oltPorts.filter(p => {
+          const activePortEntity = oltPorts.find(x => x.id === activePopup.id);
+          const activeOltName = activePortEntity?.oltName || (activePortEntity?.name ? activePortEntity.name.split(" - Port ")[0] : '');
+          const pOltName = p.oltName || (p.name ? p.name.split(" - Port ")[0] : '');
+          return pOltName && pOltName === activeOltName;
+        }) : [];
+        const isFromSameOlt = isOltActive && activeSiblingPorts.some(p => Number(p.id) === Number(node.oltPortId));
+        const isThisPortActive = isOltActive && Number(node.oltPortId) === Number(activePopup.id);
+
+        let lineColor = !anyUser ? '#94a3b8' : (isOnline ? '#2563eb' : '#ef4444');
+        let lineWeight = !anyUser ? 3 : (isOnline ? 4 : 5);
+        let lineOpacity = 0.85;
+
+        if (isOltActive && isFromSameOlt) {
+          if (isThisPortActive) {
+            lineColor = isOnline ? '#2563eb' : '#ef4444';
+            lineWeight = 6;
+            lineOpacity = 1.0;
+          } else {
+            lineColor = '#94a3b8';
+            lineWeight = 2;
+            lineOpacity = 0.25;
+          }
+        }
+
         lines.push({
           id: `olt-${node.id}`,
           coordinates: node.roadCoordinates || [[Number(port.latitude), Number(port.longitude)], [Number(node.latitude), Number(node.longitude)]],
           type: 'olt-to-odc',
-          color: !anyUser ? '#94a3b8' : (isOnline ? '#2563eb' : '#ef4444'),
-          weight: !anyUser ? 3 : (isOnline ? 4 : 5),
+          color: lineColor,
+          weight: lineWeight,
+          opacity: lineOpacity,
           dashArray: !anyUser ? '4,4' : (isOnline ? null : '8,6'),
-          animate: !anyUser ? false : isOnline,
+          animate: !anyUser ? false : (isOltActive ? isThisPortActive && isOnline : isOnline),
           label: !anyUser ? `Feeder OLT ➔ ${node.name} (Kosong)` : (isOnline ? `Feeder OLT ➔ ${node.name}` : `⚠️ PUTUS: OLT ➔ ${node.name}`)
         });
       }
@@ -553,14 +635,49 @@ export default function AdminDashboard({
     }
 
     return lines;
-  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady, nodes]);
+  }, [filteredOltPorts, filteredNodes, filteredUsers, hasOnlineUser, hasAnyUser, routers, showLines, shouldShowClients, isDeferredReady, nodes, activePopup, oltPorts]);
 
   const visibleConnections = useMemo(() => {
     return connections;
   }, [connections]);
 
   const handleMarkerClick = useCallback((entity, type) => {
-    setActivePopup({ id: entity.id, type });
+    if (type === 'node') {
+      let groupIndex = -1;
+      let targetGroup = null;
+      for (let i = 0; i < groupedNodes.length; i++) {
+        if (groupedNodes[i].some(n => n.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedNodes[i];
+          break;
+        }
+      }
+      if (targetGroup && targetGroup.length > 1) {
+        setActiveGroupDetailNode(entity);
+        setActivePopup({ id: groupIndex, type: 'group' });
+      } else {
+        setActivePopup({ id: entity.id, type });
+      }
+    } else if (type === 'client') {
+      let groupIndex = -1;
+      let targetGroup = null;
+      for (let i = 0; i < groupedUsers.length; i++) {
+        if (groupedUsers[i].some(u => u.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedUsers[i];
+          break;
+        }
+      }
+      if (targetGroup && targetGroup.length > 1) {
+        setActiveGroupDetailClient(entity);
+        setActivePopup({ id: groupIndex, type: 'clientGroup' });
+      } else {
+        setActivePopup({ id: entity.id, type });
+      }
+    } else {
+      setActivePopup({ id: entity.id, type });
+    }
+
     if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
       // Menambahkan offset latitude sekitar +0.0006 derajat agar popup detail (keterangan) 
       // berada tepat di tengah layar, bukan pin ikonnya yang tertutup di bawah.
@@ -580,7 +697,7 @@ export default function AdminDashboard({
     }
     if (type === 'oltPort' && onOltPortClick) onOltPortClick(entity.id);
     else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
-   }, [onNodeClick, onOltPortClick, mapInstance]);
+   }, [onNodeClick, onOltPortClick, mapInstance, groupedNodes, groupedUsers]);
 
   const handleGroupMarkerClick = useCallback((centerEntity, index) => {
     setActiveGroupDetailNode(null);
@@ -664,7 +781,7 @@ export default function AdminDashboard({
     const conf = entity ? (MARKER_CONFIG[entity.type] || MARKER_CONFIG.client) : null;
 
     return (
-      <Popup key={`group-node-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+      <Popup key={`group-node-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => { setActivePopup(prev => (prev?.id === index && prev?.type === 'group') ? null : prev); setActiveGroupDetailNode(null); } }}>
           {isOpen ? (
               <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
                   {/* Left Column: Stacked List */}
@@ -791,7 +908,7 @@ export default function AdminDashboard({
     const conf = MARKER_CONFIG.client;
 
     return (
-      <Popup key={`group-client-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+      <Popup key={`group-client-${index}`} minWidth={580} maxWidth={580} autoPan={false} className={`custom-detail-popup two-column-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => { setActivePopup(prev => (prev?.id === index && prev?.type === 'clientGroup') ? null : prev); setActiveGroupDetailClient(null); } }}>
           {isOpen ? (
               <div className="d-flex gap-3" style={{ minHeight: '240px' }}>
                   {/* Left Column: Stacked List */}
@@ -906,13 +1023,105 @@ export default function AdminDashboard({
   }, [activePopup, activeGroupDetailClient, isDarkMode, setActivePopup, setActiveGroupDetailClient, setLightbox, setEditEntity, setEditForm]);
 
   const renderEntityPopup = useCallback((entity, type) => {
-    const isOpen = activePopup?.id === entity.id && activePopup?.type === type;
     const tKey = type === 'node' ? entity.type : type;
     const conf = MARKER_CONFIG[tKey] || MARKER_CONFIG.client;
-    
+
+    // ── OLT PORT: always render content immediately ──────────────────────────
+    // Data is already in `entity` (no async fetch needed). We do NOT gate on
+    // activePopup here to avoid the "Memuat informasi..." stuck state that
+    // occurred because Leaflet opens the popup synchronously before React state
+    // updates.
+    if (type === 'oltPort') {
+      const currentOltName = entity.oltName || (entity.name ? entity.name.split(' - Port ')[0] : '—');
+      // Stable key: React won't unmount/remount the Popup when switching ports
+      const popupKey = `entity-olt-${currentOltName}`;
+      // Which port is currently selected? Use activePopup if it's an OLT port
+      // from THIS OLT; otherwise fall back to entity (the marker's representative port).
+      const activePortId = (activePopup?.type === 'oltPort') ? activePopup.id : entity.id;
+      // Sibling ports — all ports that share this OLT device
+      const siblingPorts = oltPorts
+        .filter(p => {
+          const pOltName = p.oltName || (p.name ? p.name.split(' - Port ')[0] : '');
+          return pOltName === currentOltName;
+        })
+        .sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+
+      return (
+        <Popup key={popupKey} minWidth={280} autoPan={false}
+          className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`}
+          eventHandlers={{ remove: () => setActivePopup(prev => (prev?.id === activePortId && prev?.type === 'oltPort') ? null : prev) }}
+        >
+          {/* header */}
+          <div className="popup-header d-flex align-items-center gap-2">
+            <div className="rounded-circle d-flex align-items-center justify-content-center text-white"
+              style={{ width: 28, height: 28, background: conf.color || '#000', flexShrink: 0 }}>
+              <i className={`bi ${conf.icon}`} style={{ fontSize: 14 }}></i>
+            </div>
+            <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: 14 }}>
+              {currentOltName}
+            </h6>
+          </div>
+          {/* body */}
+          <div className="popup-body mt-2" style={{ fontSize: 12 }}>
+            <div className="mb-2 pb-2 border-bottom">
+              <span className="text-muted">OLT Device:</span> <strong>{currentOltName}</strong>
+            </div>
+            <div style={{ maxHeight: 200, overflowY: 'auto' }} className="custom-scrollbar">
+              {siblingPorts.length === 0 ? (
+                <span className="text-muted" style={{ fontSize: 11 }}>Tidak ada port ditemukan</span>
+              ) : siblingPorts.map(port => {
+                const isSelected = Number(port.id) === Number(activePortId);
+                const connectedOdcs = nodes.filter(n => n.type === 'ODC' && Number(n.oltPortId) === Number(port.id));
+                return (
+                  <div
+                    key={port.id}
+                    className={`mb-2 p-2 rounded border ${isSelected ? 'bg-primary-subtle border-primary-subtle' : 'bg-light-subtle border-light-subtle'}`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={e => { e.stopPropagation(); setActivePopup({ id: port.id, type: 'oltPort' }); }}
+                  >
+                    <div className="d-flex align-items-center gap-1 mb-1">
+                      <span className={`fw-bold ${isSelected ? 'text-primary' : 'text-body-emphasis'}`}>
+                        Port {port.portNumber != null ? port.portNumber : (port.port ? port.port.replace('PON ', '') : '—')}
+                      </span>
+                      {isSelected && <span className="badge bg-primary ms-1" style={{ fontSize: 8 }}>Dipilih</span>}
+                    </div>
+                    <div style={{ fontSize: 11 }}>
+                      {connectedOdcs.length > 0 ? (
+                        <div className="d-flex flex-wrap gap-1">
+                          {connectedOdcs.map(odc => (
+                            <span
+                              key={odc.id}
+                              className="badge bg-primary text-white"
+                              style={{ fontSize: 9, cursor: 'pointer' }}
+                              title={`Klik untuk menuju ke ${odc.name}`}
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleMarkerClick(odc, 'node');
+                              }}
+                            >
+                              <i className="bi bi-diagram-3-fill me-1"></i>{odc.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted" style={{ fontSize: 10 }}>Belum terhubung ke ODC</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Popup>
+      );
+    }
+
+    // ── ALL OTHER TYPES: gate on activePopup (original behaviour) ───────────
+    const isOpen = activePopup?.id === entity.id && activePopup?.type === type;
     const popupKey = `entity-${entity.id}-${type}`;
+
     return (
-        <Popup key={popupKey} minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(null) }}>
+        <Popup key={popupKey} minWidth={260} autoPan={false} className={`custom-detail-popup ${isDarkMode ? 'dark-popup' : ''}`} eventHandlers={{ remove: () => setActivePopup(prev => (prev?.id === entity.id && prev?.type === type) ? null : prev) }}>
             {isOpen ? (
                 <>
                     <div className="popup-header d-flex align-items-center gap-2">
@@ -925,13 +1134,11 @@ export default function AdminDashboard({
                         {type === 'router' && (
                             <>
                                 <div className="mb-1"><span className="text-muted">Status:</span> <span className={`badge ${entity.isOnline ? 'bg-success' : 'bg-danger'}`}>{entity.isOnline ? 'Online' : 'Offline'}</span></div>
-                                <div className="mb-1"><span className="text-muted">IP Address:</span> <strong>{entity.ipAddress || '—'}</strong></div>
-                            </>
-                        )}
-                        {type === 'oltPort' && (
-                            <>
-                                <div className="mb-1"><span className="text-muted">OLT Name:</span> <strong>{entity.oltName || '—'}</strong></div>
-                                <div className="mb-1"><span className="text-muted">Port No:</span> <strong>{entity.portNumber != null ? entity.portNumber : '—'}</strong></div>
+                                <div className="mb-1"><span className="text-muted">IP Address:</span> <strong>{entity.host || '—'}</strong></div>
+                                <div className="mb-1"><span className="text-muted">Port:</span> <strong>{entity.port || 8728}</strong></div>
+                                <div className="mb-1"><span className="text-muted">Last Seen:</span> <strong>{entity.lastSeen ? new Date(entity.lastSeen).toLocaleString('id-ID') : '—'}</strong></div>
+                                <div className="mb-1"><span className="text-muted">Total OLT Port:</span> <strong>{oltPorts.filter(p => p.routerId === entity.id).length}</strong></div>
+                                <div className="mb-1"><span className="text-muted">Total Clients:</span> <strong>{pppoeUsers.filter(u => u.routerId === entity.id).length} ({pppoeUsers.filter(u => u.routerId === entity.id && u.isOnline).length} Online)</strong></div>
                             </>
                         )}
                         {type === 'node' && (
@@ -1012,61 +1219,9 @@ export default function AdminDashboard({
             )}
         </Popup>
     );
-  }, [isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, activePopup]);
+  }, [isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick]);
 
-  const getClusterThreshold = (zoom) => {
-    if (zoom >= 19) return 0.000005; // ~0.5m (exact overlaps only)
-    if (zoom === 18) return 0.00003;  // ~3m
-    if (zoom === 17) return 0.00008;  // ~8m
-    if (zoom === 16) return 0.0002;   // ~22m
-    if (zoom === 15) return 0.0005;   // ~55m
-    if (zoom === 14) return 0.001;    // ~110m
-    if (zoom === 13) return 0.002;    // ~220m
-    if (zoom === 12) return 0.005;    // ~550m
-    return 0.01; // zoom <= 11
-  };
 
-  const groupedNodes = useMemo(() => {
-    const groupMap = new Map();
-    const threshold = getClusterThreshold(mapZoom);
-
-    filteredNodes.forEach(node => {
-        if (!isValidCoord(node.latitude, node.longitude)) return;
-        
-        // Create a grid key based on threshold for O(1) lookup bucketing
-        const latKey = Math.round(node.latitude / threshold);
-        const lngKey = Math.round(node.longitude / threshold);
-        const key = `${latKey}_${lngKey}`;
-        
-        if (!groupMap.has(key)) {
-            groupMap.set(key, []);
-        }
-        groupMap.get(key).push(node);
-    });
-
-    return Array.from(groupMap.values());
-  }, [filteredNodes, mapZoom]);
-
-  const groupedUsers = useMemo(() => {
-    const groupMap = new Map();
-    const threshold = getClusterThreshold(mapZoom);
-
-    filteredUsers.forEach(user => {
-        if (!user.topologyNodeId || !isValidCoord(user.latitude, user.longitude)) return;
-        
-        // Create a grid key based on threshold for O(1) lookup bucketing
-        const latKey = Math.round(user.latitude / threshold);
-        const lngKey = Math.round(user.longitude / threshold);
-        const key = `${latKey}_${lngKey}`;
-        
-        if (!groupMap.has(key)) {
-            groupMap.set(key, []);
-        }
-        groupMap.get(key).push(user);
-    });
-
-    return Array.from(groupMap.values());
-  }, [filteredUsers, mapZoom]);
 
   const mapMarkers = useMemo(() => {
     if (!isDeferredReady) return null;
@@ -1090,20 +1245,32 @@ export default function AdminDashboard({
         );
         });
 
+        const oltGroupsMap = new Map();
         filteredOltPorts.forEach(port => {
-        if (!isValidCoord(port.latitude, port.longitude)) return;
-        
-        const isOpen = activePopup?.id === port.id && activePopup?.type === 'oltPort';
-        infraMarkers.push(
-            <MemoizedMarker 
-                key={`olt-${port.id}`} 
-                position={[Number(port.latitude), Number(port.longitude)]} 
-                icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon, false, 'olt')} 
-                onClick={() => handleMarkerClick(port, 'oltPort')}
-                isOpen={isOpen}
-                renderPopup={() => renderEntityPopup(port, 'oltPort')}
-            />
-        );
+            if (!isValidCoord(port.latitude, port.longitude)) return;
+            const oltName = port.oltName || (port.name ? port.name.split(" - Port ")[0] : 'Unknown OLT');
+            const key = `${oltName}_${Number(port.latitude).toFixed(6)}_${Number(port.longitude).toFixed(6)}`;
+            if (!oltGroupsMap.has(key)) {
+                oltGroupsMap.set(key, []);
+            }
+            oltGroupsMap.get(key).push(port);
+        });
+
+        oltGroupsMap.forEach((ports, key) => {
+            ports.sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+            const activePort = ports.find(p => Number(p.id) === Number(activePopup?.id) && activePopup?.type === 'oltPort') || ports[0];
+            const isOpen = ports.some(p => Number(p.id) === Number(activePopup?.id) && activePopup?.type === 'oltPort');
+            
+            infraMarkers.push(
+                <MemoizedMarker 
+                    key={`olt-group-${key}`} 
+                    position={[Number(activePort.latitude), Number(activePort.longitude)]} 
+                    icon={createCustomIcon(MARKER_CONFIG.oltPort.color, MARKER_CONFIG.oltPort.icon, false, 'olt')} 
+                    onClick={() => handleMarkerClick(activePort, 'oltPort')}
+                    isOpen={isOpen}
+                    renderPopup={() => renderEntityPopup(activePort, 'oltPort')}
+                />
+            );
         });
 
         // GROUPING OVERLAPPING NODES (Cluster Simulation) - Highly Optimized O(N) Grid Bucketing

@@ -34,6 +34,8 @@ async function broadcastTopologyUpdate() {
       id: p.id,
       routerId: p.olt?.routerId,
       name: p.olt ? `${p.olt.name} - Port ${p.index}` : `Port ${p.index}`,
+      oltName: p.olt?.name || '',
+      portNumber: p.index,
       port: `PON ${p.index}`,
       latitude: p.olt?.latitude,
       longitude: p.olt?.longitude,
