@@ -1179,10 +1179,9 @@ export default function AdminDashboard({
               style={{ width: 28, height: 28, background: status.color, flexShrink: 0 }}>
               <i className={`bi ${conf.icon}`} style={{ fontSize: 14 }}></i>
             </div>
-            <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: 14 }}>
+            <h6 className="mb-0 fw-bold popup-title-readable">
               {currentOltName}
             </h6>
-            <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: 10 }}>{status.label}</span>
           </div>
           {/* body */}
           <div className="popup-body mt-2" style={{ fontSize: 12 }}>
@@ -1265,8 +1264,7 @@ export default function AdminDashboard({
                         <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '28px', height: '28px', background: status.color, flexShrink: 0 }}>
                             <i className={`bi ${conf.icon}`} style={{ fontSize: '14px' }}></i>
                         </div>
-                        <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '14px' }}>{entity.name || entity.username}</h6>
-                        {type !== 'client' && <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>}
+                        <h6 className="mb-0 fw-bold popup-title-readable">{entity.name || entity.username}</h6>
                     </div>
                     <div className="popup-body mt-2" style={{ fontSize: '12px' }}>
                         {type === 'router' && (
