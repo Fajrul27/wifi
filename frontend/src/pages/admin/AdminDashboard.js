@@ -307,7 +307,7 @@ export default function AdminDashboard({
 
   const filteredOltPorts = useMemo(() => {
     return selectedRouter 
-      ? oltPorts.filter(p => p.routerId === Number(selectedRouter))
+      ? oltPorts.filter(p => Number(p.routerId) === Number(selectedRouter))
       : oltPorts;
   }, [oltPorts, selectedRouter]);
 
@@ -316,7 +316,7 @@ export default function AdminDashboard({
     const isNodeOnRouter = (node) => {
       if (node.oltPortId) {
         const port = oltPorts.find(p => Number(p.id) === Number(node.oltPortId));
-        return port?.routerId === Number(selectedRouter);
+        return Number(port?.routerId) === Number(selectedRouter);
       }
       if (node.parentNodeId) {
         const parent = nodes.find(n => n.type === "ODC" && Number(n.id) === Number(node.parentNodeId));
