@@ -3,6 +3,39 @@ import api from "../../../services/api";
 
 const globalOdcTreeCache = {};
 const globalOdcTreeLoading = {};
+const globalOdcTreeRequests = {};
+const TREE_CACHE_PREFIX = "ftth_odc_tree_";
+
+const readTreeCache = (portId) => {
+  if (!portId) return [];
+  if (globalOdcTreeCache[portId]) return globalOdcTreeCache[portId];
+  try {
+    const raw = sessionStorage.getItem(`${TREE_CACHE_PREFIX}${portId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    globalOdcTreeCache[portId] = parsed;
+    return parsed;
+  } catch {
+    return [];
+  }
+};
+
+const writeTreeCache = (portId, data) => {
+  if (!portId || !Array.isArray(data)) return;
+  globalOdcTreeCache[portId] = data;
+  try {
+    sessionStorage.setItem(`${TREE_CACHE_PREFIX}${portId}`, JSON.stringify(data));
+  } catch {}
+};
+
+const clearTreeCache = (portId) => {
+  if (!portId) return;
+  delete globalOdcTreeCache[portId];
+  try {
+    sessionStorage.removeItem(`${TREE_CACHE_PREFIX}${portId}`);
+  } catch {}
+};
 
 // ─────────────────────────────────────────────────────────────
 // UTIL
@@ -434,7 +467,7 @@ export default function PortItem({
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = propExpanded !== undefined ? propExpanded : localExpanded;
   const setExpanded = propOnToggle !== undefined ? propOnToggle : setLocalExpanded;
-  const [odcTree, setOdcTree] = useState(() => globalOdcTreeCache[port?.id] || []);
+  const [odcTree, setOdcTree] = useState(() => readTreeCache(port?.id));
   const [loadingTree, setLoadingTree] = useState(() => port?.id && globalOdcTreeLoading[port.id]);
 
   const isUsed = port?.isUsed === true || (port?._count?.odcs ?? 0) > 0;
@@ -442,40 +475,39 @@ export default function PortItem({
   const fetchTree = useCallback(async (force = false) => {
     if (!port?.id) return;
     
-    // Don't refetch if we already have it in cache unless forced (refresh)
-    if (!force && globalOdcTreeCache[port.id]) {
-      setOdcTree(globalOdcTreeCache[port.id]);
+    const cachedTree = readTreeCache(port.id);
+    if (!force && cachedTree.length > 0) {
+      setOdcTree(cachedTree);
+      return;
+    }
+
+    if (force) clearTreeCache(port.id);
+
+    if (globalOdcTreeRequests[port.id]) {
+      setLoadingTree(true);
+      const data = await globalOdcTreeRequests[port.id];
+      setOdcTree(data);
+      setLoadingTree(false);
       return;
     }
     
-    setLoadingTree(true);
+    setLoadingTree(!cachedTree.length);
     globalOdcTreeLoading[port.id] = true;
 
-    // Stagger the initial load based on port index to prevent backend timeout (API storm)
-    if (!force) {
-      await new Promise(resolve => setTimeout(resolve, (port.index % 50) * 150));
-      // Check cache again in case another instance loaded it
-      if (globalOdcTreeCache[port.id]) {
-        setOdcTree(globalOdcTreeCache[port.id]);
-        setLoadingTree(false);
-        globalOdcTreeLoading[port.id] = false;
-        return;
-      }
-    }
-
     try {
-      const res = await api.get(`/topology/odc/tree/${port.id}`);
-      const data = res.data?.data ?? [];
+      globalOdcTreeRequests[port.id] = api.get(`/topology/odc/tree/${port.id}`).then((res) => res.data?.data ?? []);
+      const data = await globalOdcTreeRequests[port.id];
       setOdcTree(data);
-      globalOdcTreeCache[port.id] = data;
+      writeTreeCache(port.id, data);
     } catch (err) {
       console.error("Gagal load ODC tree:", err.response?.data || err);
-      if (!globalOdcTreeCache[port.id]) setOdcTree([]);
+      if (!readTreeCache(port.id).length) setOdcTree([]);
     } finally { 
       setLoadingTree(false); 
       globalOdcTreeLoading[port.id] = false;
+      delete globalOdcTreeRequests[port.id];
     }
-  }, [port?.id, port?.index]);
+  }, [port?.id]);
 
   // Auto-expand jika port terpakai
   useEffect(() => {

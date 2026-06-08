@@ -2,6 +2,30 @@ import React, { useState, useEffect } from 'react';
 import api from '../../../services/api';
 import { getMapEntityStatus } from '../utils/mapUtils';
 
+const portDetailCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+const getDetailCacheKey = (node) => {
+  if (!node) return null;
+  const realId = node.id >= 100000 && node.type === 'ODP' ? node.id - 100000 : node.id;
+  return `${node.type}:${realId}`;
+};
+
+const getCachedDetail = (node) => {
+  const key = getDetailCacheKey(node);
+  if (!key) return null;
+  const cached = portDetailCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.loadedAt > CACHE_TTL_MS) return null;
+  return cached.data;
+};
+
+const setCachedDetail = (node, data) => {
+  const key = getDetailCacheKey(node);
+  if (!key || !data) return;
+  portDetailCache.set(key, { data, loadedAt: Date.now() });
+};
+
 const NodePortDetailModal = ({
   show,
   onClose,
@@ -18,6 +42,58 @@ const NodePortDetailModal = ({
 
   const isRouterOrOlt = node?.type === 'Router' || node?.type === 'oltPort';
   const isRouter = node?.type === 'Router';
+
+  const buildLocalPortDetails = (targetNode) => {
+    if (!targetNode || isRouterOrOlt) return null;
+    const id = Number(targetNode.id);
+    const realId = id >= 100000 && targetNode.type === 'ODP' ? id - 100000 : id;
+
+    if (targetNode.type === 'ODC') {
+      const childNodes = nodes.filter(n => Number(n.parentNodeId) === realId);
+      const portCount = Number(targetNode.portCount || targetNode.totalPorts || targetNode.portsCount || 0);
+      const inferredCount = Math.max(portCount, childNodes.length, 8);
+
+      return {
+        ...targetNode,
+        ports: Array.from({ length: inferredCount }, (_, idx) => {
+          const child = childNodes[idx];
+          return {
+            id: `local-odc-${realId}-${idx + 1}`,
+            index: idx + 1,
+            isUsed: !!child,
+            connectionType: child?.type || 'NONE',
+            connectedOdcId: child?.type === 'ODC' ? child.id : null,
+            connectedOdpId: child?.type === 'ODP' ? (Number(child.id) >= 100000 ? Number(child.id) - 100000 : child.id) : null,
+            connectionName: child?.name || null
+          };
+        })
+      };
+    }
+
+    if (targetNode.type === 'ODP') {
+      const users = pppoeUsers.filter(u => {
+        const nodeId = Number(u.topologyNodeId);
+        return nodeId === id || nodeId === realId || nodeId === realId + 100000;
+      });
+      const portCount = Number(targetNode.portCount || targetNode.totalPorts || targetNode.portsCount || 0);
+      const inferredCount = Math.max(portCount, users.length, 8);
+
+      return {
+        ...targetNode,
+        ports: Array.from({ length: inferredCount }, (_, idx) => {
+          const user = users[idx];
+          return {
+            id: `local-odp-${realId}-${idx + 1}`,
+            index: idx + 1,
+            isUsed: !!user,
+            user: user || null
+          };
+        })
+      };
+    }
+
+    return null;
+  };
 
   useEffect(() => {
     if (show && node) {
@@ -95,7 +171,16 @@ const NodePortDetailModal = ({
           setLoading(false);
         }
       } else {
-        fetchPortDetails();
+        const cached = getCachedDetail(node);
+        const localData = cached || buildLocalPortDetails(node);
+        if (localData) {
+          setData(localData);
+          setError(null);
+          setLoading(false);
+          fetchPortDetails({ background: true });
+        } else {
+          fetchPortDetails();
+        }
       }
     } else {
       setData(null);
@@ -103,8 +188,8 @@ const NodePortDetailModal = ({
     }
   }, [show, node]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchPortDetails = async () => {
-    setLoading(true);
+  const fetchPortDetails = async ({ background = false } = {}) => {
+    if (!background) setLoading(true);
     setError(null);
     try {
       const type = node.type === 'ODP' ? 'odp' : 'odc';
@@ -112,13 +197,14 @@ const NodePortDetailModal = ({
       const res = await api.get(`/topology/${type}/${realId}`);
       if (res.data?.success) {
         setData(res.data.data);
+        setCachedDetail(node, res.data.data);
       } else {
-        setError(res.data?.message || 'Gagal memuat data port');
+        if (!background) setError(res.data?.message || 'Gagal memuat data port');
       }
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Gagal memuat data port');
+      if (!background) setError(err.response?.data?.message || err.message || 'Gagal memuat data port');
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 

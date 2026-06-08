@@ -26,8 +26,23 @@ const generateNextPort = (existingPorts) => {
 
 /* ───────────────── GLOBAL CACHE ───────────────── */
 // Persist data across page navigation without sessionStorage
-let globalRoutersCache = [];
-let globalOltsCache = {};
+const readJsonCache = (key, fallback) => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const writeJsonCache = (key, value) => {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+};
+
+let globalRoutersCache = readJsonCache("ftth_routers_cache", []);
+let globalOltsCache = readJsonCache("ftth_olts_cache", {});
 
 // ─────────────────────────────────────────────────────────────
 // REUSABLE COMPONENTS
@@ -415,6 +430,7 @@ export default function OltManagement() {
         const routersData = await loadRouters();
         if (!isMountedRef.current) return;
         globalRoutersCache = routersData;
+        writeJsonCache("ftth_routers_cache", routersData);
         setRouters(routersData);
         
         if (routersData.length > 0 && !selectedRouter) {
@@ -496,7 +512,8 @@ export default function OltManagement() {
     const currentOlts = oltsByRouter[selectedRouter] || [];
     currentOlts.forEach(o => {
       (o.ports || []).forEach(p => {
-        allPorts[p.id] = true;
+        const isUsed = p?.isUsed === true || (p?._count?.odcs ?? 0) > 0;
+        if (isUsed) allPorts[p.id] = true;
       });
     });
     setExpandedPorts(allPorts);
@@ -506,9 +523,14 @@ export default function OltManagement() {
     setExpandedPorts({});
   };
 
-  const loadRouterOlts = useCallback(async (routerId) => {
+  const loadRouterOlts = useCallback(async (routerId, options = {}) => {
     if (!routerId) return;
-    if (!globalOltsCache[routerId]) setLoading(true);
+    const { force = false, silent = false } = options;
+    if (!force && globalOltsCache[routerId]) {
+      setOltsByRouter(prev => ({ ...prev, [routerId]: globalOltsCache[routerId] }));
+      return globalOltsCache[routerId];
+    }
+    if (!globalOltsCache[routerId] && !silent) setLoading(true);
     
     try {
       const olts = await loadOltsByRouter(routerId);
@@ -520,9 +542,11 @@ export default function OltManagement() {
       );
       
       globalOltsCache[routerId] = oltsWithPorts;
+      writeJsonCache("ftth_olts_cache", globalOltsCache);
       if (isMountedRef.current) {
         setOltsByRouter(prev => ({ ...prev, [routerId]: oltsWithPorts }));
       }
+      return oltsWithPorts;
     } catch (err) {
       console.error("Failed to load OLTs:", err);
     } finally {
@@ -537,13 +561,13 @@ export default function OltManagement() {
   /* ───────────────── CRUD OPERATIONS ───────────────── */
   const handleCreateOlt = async (formData) => {
     const { data } = await api.post("/olts/olt", formData);
-    await loadRouterOlts(formData.routerId);
+    await loadRouterOlts(formData.routerId, { force: true });
     return data;
   };
 
   const handleUpdateOlt = async (formData) => {
     const { data } = await api.put(`/olts/olt/${editingOlt.id}`, formData);
-    await loadRouterOlts(formData.routerId);
+    await loadRouterOlts(formData.routerId, { force: true });
     return data;
   };
 
@@ -552,7 +576,7 @@ export default function OltManagement() {
     const { id, routerId } = confirmDelete.olt;
     try {
       await api.delete(`/olts/olt/${id}`);
-      await loadRouterOlts(routerId);
+      await loadRouterOlts(routerId, { force: true });
     } catch (err) {
       alert("Gagal menghapus OLT: " + err.message);
     } finally {
@@ -568,7 +592,7 @@ const handleAddPort = async (olt) => {
       ports: [nextPort],
     });
 
-    await loadRouterOlts(olt.routerId);
+    await loadRouterOlts(olt.routerId, { force: true });
 
   } catch (err) {
     alert(err.response?.data?.message || "Gagal tambah port");
@@ -579,7 +603,7 @@ const handleAddPort = async (olt) => {
     setPortLoading(prev => ({ ...prev, [`delete-${portId}`]: true }));
     try {
       await api.delete(`/olts/olt/ports/${portId}`);
-      await loadRouterOlts(routerId);
+      await loadRouterOlts(routerId, { force: true });
     } catch (err) {
       alert("Gagal menghapus port: " + err.message);
     } finally {
@@ -604,7 +628,7 @@ const handleAddPort = async (olt) => {
   };
   const handleCreateOdc = async () => {
     // Root ODC: refresh OLT list agar isUsed port berubah
-    if (selectedRouter) await loadRouterOlts(selectedRouter);
+    if (selectedRouter) await loadRouterOlts(selectedRouter, { force: true });
   };
 
   // ─── Child ODC (dari port ODC) ───
@@ -649,7 +673,7 @@ const handleAddPort = async (olt) => {
           const realId = rawOdpId >= 100000 ? rawOdpId - 100000 : rawOdpId;
           await api.delete(`/topology/odp/${realId}`);
           if (fetchTreeCb) await fetchTreeCb();
-          if (selectedRouter) await loadRouterOlts(selectedRouter);
+          if (selectedRouter) await loadRouterOlts(selectedRouter, { force: true });
         } catch (err) {
           alert("Gagal hapus ODP: " + (err.response?.data?.message || err.message));
         } finally {
@@ -669,7 +693,7 @@ const handleAddPort = async (olt) => {
         try {
           await api.delete(`/topology/odc/${odc.id}`);
           if (fetchTreeCb) await fetchTreeCb();
-          if (selectedRouter) await loadRouterOlts(selectedRouter);
+          if (selectedRouter) await loadRouterOlts(selectedRouter, { force: true });
         } catch (err) {
           alert("Gagal hapus ODC: " + (err.response?.data?.message || err.message));
         } finally {
@@ -775,7 +799,7 @@ const handleAddPort = async (olt) => {
             </button>
             <button
               className="btn btn-outline-secondary btn-sm"
-              onClick={() => selectedRouter && loadRouterOlts(selectedRouter)}
+              onClick={() => selectedRouter && loadRouterOlts(selectedRouter, { force: true })}
               disabled={loading}
             >
               <i className={`bi bi-arrow-clockwise ${loading ? "spinner-border spinner-border-sm" : ""}`}></i>
