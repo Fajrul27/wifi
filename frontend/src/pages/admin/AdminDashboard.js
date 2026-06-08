@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import "./AdminDashboard.css";
 import L from "leaflet";
 import api from "../../services/api";
-import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates, getMapEntityStatus } from "./utils/mapUtils";
+import { createCustomIcon, MARKER_CONFIG, isValidCoord, sanitizeCoordinates, buildCableCoordinates, getMapEntityStatus } from "./utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "./components/DashboardMapComponents";
 import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
@@ -528,19 +528,43 @@ export default function AdminDashboard({
     // Use Number(n.id) as key to avoid string/number type mismatch in production builds
     const nodesMap = new Map(nodes.map(n => [Number(n.id), n]));
 
+    const routerOltGroups = new Map();
     filteredOltPorts.forEach(port => {
       const router = routers.find(r => Number(r.id) === Number(port.routerId));
       if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
-        lines.push({
-          id: `router-olt-${port.id}`,
-          coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
-          type: 'router-to-olt',
-          color: '#0ea5e9',
-          weight: 4,
-          animate: true,
-          label: `Router ${router.name} ➔ OLT Port ${port.name}`
-        });
+        const oltName = port.oltName || (port.name ? port.name.split(" - Port ")[0] : 'OLT');
+        const groupKey = `${port.routerId}-${port.oltId || oltName}-${Number(port.latitude).toFixed(6)}-${Number(port.longitude).toFixed(6)}`;
+        if (!routerOltGroups.has(groupKey)) {
+          routerOltGroups.set(groupKey, {
+            router,
+            oltName,
+            ports: [],
+          });
+        }
+        routerOltGroups.get(groupKey).ports.push(port);
       }
+    });
+
+    routerOltGroups.forEach(({ router, oltName, ports }, groupKey) => {
+      const sortedPorts = [...ports].sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+      const activeGroupPort = activePopup?.type === 'oltPort'
+        ? sortedPorts.find(p => Number(p.id) === Number(activePopup.id))
+        : null;
+      const routedPort = sortedPorts.find(p => sanitizeCoordinates(p.roadCoordinates));
+      const representativePort = activeGroupPort || routedPort || sortedPorts[0];
+
+      lines.push({
+        id: `router-olt-group-${groupKey}`,
+        portIds: sortedPorts.map(p => p.id),
+        coordinates: buildCableCoordinates(representativePort.roadCoordinates, router.latitude, router.longitude, representativePort.latitude, representativePort.longitude),
+        type: 'router-to-olt',
+        color: '#0ea5e9',
+        weight: 4,
+        animate: true,
+        label: sortedPorts.length > 1
+          ? `Router ${router.name} ➔ ${oltName} (${sortedPorts.length} Ports)`
+          : `Router ${router.name} ➔ OLT Port ${representativePort.name}`
+      });
     });
 
     filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
@@ -1658,8 +1682,8 @@ export default function AdminDashboard({
       const cable = editingCable;
 
       if (cable.type === 'router-to-olt') {
-        const portId = cable.id.replace('router-olt-', '');
-        await api.put(`/olt-ports/${portId}`, payload);
+        const portIds = cable.portIds?.length ? cable.portIds : [cable.id.replace('router-olt-', '')];
+        await Promise.all(portIds.map(portId => api.put(`/olt-ports/${portId}`, payload)));
       } else if (cable.type === 'olt-to-odc') {
         const nodeId = cable.id.replace('olt-', '');
         await api.put(`/topology/odc/${nodeId}`, payload);
@@ -1720,8 +1744,8 @@ export default function AdminDashboard({
           };
 
           if (cable.type === 'router-to-olt') {
-            const portId = cable.id.replace('router-olt-', '');
-            await api.put(`/olt-ports/${portId}`, payload);
+            const portIds = cable.portIds?.length ? cable.portIds : [cable.id.replace('router-olt-', '')];
+            await Promise.all(portIds.map(portId => api.put(`/olt-ports/${portId}`, payload)));
           } else if (cable.type === 'olt-to-odc') {
             const nodeId = cable.id.replace('olt-', '');
             await api.put(`/topology/odc/${nodeId}`, payload);
