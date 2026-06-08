@@ -63,9 +63,9 @@ function formatDuration(ms = 0) {
 
   let out = "";
   if (d) out += `${d}d `;
-  if (h) out += `${h}h `;
-  if (m) out += `${m}m `;
-  if (s || !out) out += `${s}s`;
+  if (h || d) out += `${h}h `;
+  if (m || h || d) out += `${m}m `;
+  out += `${s}s`;
 
   return out.trim();
 }

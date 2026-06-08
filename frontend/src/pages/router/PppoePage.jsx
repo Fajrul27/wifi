@@ -28,7 +28,7 @@ const formatDuration = (ms = 0) => {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (days > 0) return `${days}d ${hours}h ${minutes}m ${seconds}s`;
   if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
@@ -59,7 +59,10 @@ const getLiveSessionDuration = (user, now) => {
   const baseTime = user?.lastDisconnect || user?.lastSeen || user?.createdAt;
   const baseDate = baseTime ? new Date(baseTime) : null;
   if (baseDate && !isNaN(baseDate)) return formatDuration(now - baseDate.getTime());
-  return user?.downtime || "-";
+
+  const downtimeMs = parseDuration(user?.downtime);
+  const elapsedMs = user?.realtimeUpdatedAt ? now - Number(user.realtimeUpdatedAt) : 0;
+  return downtimeMs > 0 || elapsedMs > 0 ? formatDuration(downtimeMs + elapsedMs) : "-";
 };
 
 // ─────────────────────────────────────────────────────────────
