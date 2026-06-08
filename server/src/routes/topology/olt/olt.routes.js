@@ -1,4 +1,3 @@
-console.log("OLT ROUTES LOADED");
 const express = require("express");
 
 const router = express.Router();

@@ -571,7 +571,6 @@ const handleAddPort = async (olt) => {
     await loadRouterOlts(olt.routerId);
 
   } catch (err) {
-    console.log(err.response?.data);
     alert(err.response?.data?.message || "Gagal tambah port");
   }
 };

@@ -667,7 +667,7 @@ export default function TechnicianDashboard({
       let groupIndex = -1;
       let targetGroup = null;
       for (let i = 0; i < groupedNodes.length; i++) {
-        if (groupedNodes[i].some(n => n.id === entity.id)) {
+        if (groupedNodes[i].some(n => Number(n.id) === Number(entity.id))) {
           groupIndex = i;
           targetGroup = groupedNodes[i];
           break;
@@ -683,7 +683,7 @@ export default function TechnicianDashboard({
       let groupIndex = -1;
       let targetGroup = null;
       for (let i = 0; i < groupedUsers.length; i++) {
-        if (groupedUsers[i].some(u => u.id === entity.id)) {
+        if (groupedUsers[i].some(u => Number(u.id) === Number(entity.id))) {
           groupIndex = i;
           targetGroup = groupedUsers[i];
           break;
@@ -738,7 +738,6 @@ export default function TechnicianDashboard({
     }
 
     if (!entity) {
-      console.warn('[handleNavigateToEntity] Entity not found:', { entityId, type });
       setPortDetailNode(null);
       return;
     }

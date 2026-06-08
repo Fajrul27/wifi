@@ -108,8 +108,8 @@ export default function AdminLayout({ children }) {
       try {
         const res = await api.get("/auth/me");
         if (res.data?.user) setUser(res.data.user);
-      } catch (err) {
-        console.log(err);
+      } catch {
+        setUser(null);
       }
     };
 
@@ -126,8 +126,8 @@ export default function AdminLayout({ children }) {
       setLoadingLogout(true);
       await api.post("/auth/logout");
       navigate("/");
-    } catch (err) {
-      console.log("Logout error:", err);
+    } catch {
+      navigate("/");
     } finally {
       setLoadingLogout(false);
       setShowLogoutConfirm(false);

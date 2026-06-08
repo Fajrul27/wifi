@@ -299,11 +299,6 @@ export default function AddSecret({
             remoteIpv6PrefixPool.trim();
         }
 
-        console.log(
-          "PAYLOAD:",
-          payload
-        );
-
         const res = await api.post(`/pppoe/${routerId}/user`, payload);
         const json = res.data;
 

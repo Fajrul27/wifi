@@ -22,8 +22,8 @@ export default function Profile() {
           email: res.data.user.email,
           password: "",
         });
-      } catch (err) {
-        console.log(err);
+      } catch {
+        setUser(null);
       }
     };
     

@@ -704,22 +704,16 @@ export default function AdminDashboard({
    }, [onNodeClick, onOltPortClick, mapInstance, groupedNodes, groupedUsers]);
 
   const handleNavigateToEntity = useCallback((entityId, type) => {
-    console.log('[handleNavigateToEntity] Navigation initiated:', { entityId, type });
     // 1. Find the target entity
     let entity = null;
     if (type === 'client') {
       entity = pppoeUsers.find(u => Number(u.id) === Number(entityId) || u.username === entityId);
     } else if (type === 'node') {
-      console.log('[handleNavigateToEntity] Searching nodes, total nodes:', nodes.length);
       // ODP IDs in the frontend nodes array = database_id + 100000
       entity = nodes.find(n => {
         if (n.type === 'ODC') return Number(n.id) === Number(entityId);
         if (n.type === 'ODP') {
-          const match = Number(n.id) === Number(entityId) + 100000 || Number(n.id) === Number(entityId);
-          if (match) {
-            console.log('[handleNavigateToEntity] Found matching ODP node:', n);
-          }
-          return match;
+          return Number(n.id) === Number(entityId) + 100000 || Number(n.id) === Number(entityId);
         }
         return false;
       });
@@ -727,10 +721,7 @@ export default function AdminDashboard({
       entity = oltPorts.find(p => Number(p.id) === Number(entityId));
     }
 
-    console.log('[handleNavigateToEntity] Lookup result:', { entityId, found: !!entity, entityName: entity?.name });
-
     if (!entity) {
-      console.warn('[handleNavigateToEntity] Entity not found:', { entityId, type });
       setPortDetailNode(null);
       return;
     }
@@ -739,18 +730,16 @@ export default function AdminDashboard({
     let groupIndex = -1;
     let targetGroup = null;
     if (type === 'node') {
-      console.log('[handleNavigateToEntity] Searching groupedNodes, total groups:', groupedNodes.length);
       for (let i = 0; i < groupedNodes.length; i++) {
-        if (groupedNodes[i].some(n => n.id === entity.id)) {
+        if (groupedNodes[i].some(n => Number(n.id) === Number(entity.id))) {
           groupIndex = i;
           targetGroup = groupedNodes[i];
-          console.log(`[handleNavigateToEntity] Entity belongs to group index ${i}, group size: ${groupedNodes[i].length}`);
           break;
         }
       }
     } else if (type === 'client') {
       for (let i = 0; i < groupedUsers.length; i++) {
-        if (groupedUsers[i].some(u => u.id === entity.id)) {
+        if (groupedUsers[i].some(u => Number(u.id) === Number(entity.id))) {
           groupIndex = i;
           targetGroup = groupedUsers[i];
           break;

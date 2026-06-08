@@ -1,6 +1,11 @@
 const { Server } = require("socket.io");
 const redis = require("../utils/redis");
 
+const debugSocket = process.env.DEBUG_SOCKET === "true";
+const debugLog = (...args) => {
+  if (debugSocket) console.log(...args);
+};
+
 function initSocket(server) {
   const io = new Server(server, {
     cors: {
@@ -8,70 +13,55 @@ function initSocket(server) {
     },
   });
 
-  console.log("⚡ Socket.IO running");
+  debugLog("Socket.IO running");
 
-  /* =========================
-     CLIENT CONNECTION
-  ========================= */
   io.on("connection", (socket) => {
-    console.log("🟢 Client connected:", socket.id);
+    debugLog("Client connected:", socket.id);
 
     socket.on("join-router", (routerId) => {
       const room = `router:${String(routerId)}`;
-
       socket.join(room);
-
-      console.log("📡 Joined room:", room);
+      debugLog("Joined room:", room);
     });
 
     socket.on("leave-router", (routerId) => {
       const room = `router:${String(routerId)}`;
-
       socket.leave(room);
-
-      console.log("📡 Left room:", room);
+      debugLog("Left room:", room);
     });
 
     socket.on("disconnect", () => {
-      console.log("🔴 Client disconnected:", socket.id);
+      debugLog("Client disconnected:", socket.id);
     });
   });
-
-  /* =========================
-     REDIS SUBSCRIBER (FIXED)
-  ========================= */
 
   const sub = redis.duplicate();
 
   async function startSubscriber() {
     try {
-      await sub.connect();
-      console.log("🟡 Redis subscriber ready");
+      if (!sub.isOpen) {
+        await sub.connect();
+      }
+      debugLog("Redis subscriber ready");
 
-      // ⚠️ DEBUG: pastikan subscribe hidup
       await sub.pSubscribe("pppoe:*", (message, channel) => {
-        console.log("🔥 REDIS EVENT:", channel);
-
         let payload;
         try {
           payload = JSON.parse(message);
         } catch (err) {
-          console.error("❌ Invalid JSON from Redis:", message);
+          console.error("Invalid JSON from Redis:", message);
           return;
         }
 
         const routerId = channel.split(":")[1];
         const room = `router:${routerId}`;
-
-        console.log("📤 EMIT TO ROOM:", room);
+        debugLog("Emit to room:", room);
 
         io.to(room).emit("pppoe-update", payload);
+        io.to(room).emit("pppoe-realtime", payload);
       });
-
     } catch (err) {
-      console.error("❌ Redis subscriber failed:", err.message);
-
-      // auto retry biar production aman
+      console.error("Redis subscriber failed:", err.message);
       setTimeout(startSubscriber, 3000);
     }
   }

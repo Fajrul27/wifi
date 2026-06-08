@@ -155,6 +155,10 @@ const NodePortDetailModal = ({
       return nodes.find(n => n.type === 'ODC' && Number(n.id) === Number(port.connectedOdcId));
     }
 
+    if (port.connectionName) {
+      return nodes.find(n => n.name === port.connectionName);
+    }
+
     return null;
   };
 
@@ -257,20 +261,19 @@ const NodePortDetailModal = ({
                         </div>
                       );
                     })()}
+                    {(() => {
+                      const connectedNode = findNodeByConnection(port);
+                      const targetId = connectedNode?.id || port.connectedOdpId || port.connectedOdcId;
+                      const canNavigate = targetId !== undefined && targetId !== null;
+                      return (
                     <div
                       className="fw-bold text-truncate text-primary"
-                      style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                      style={{ cursor: canNavigate ? 'pointer' : 'default', textDecoration: canNavigate ? 'underline' : 'none' }}
                       onClick={() => {
-                        console.log('[NodePortDetailModal] Clicked connection:', {
-                          connectedOdpId: port.connectedOdpId,
-                          connectedOdcId: port.connectedOdcId,
-                          connectionType: port.connectionType,
-                          connectionName: port.connectionName,
-                          idPassed: port.connectedOdpId || port.connectedOdcId
-                        });
+                        if (!canNavigate) return;
                         onNavigateToEntity &&
                         onNavigateToEntity(
-                          port.connectedOdpId || port.connectedOdcId,
+                          targetId,
                           'node'
                         );
                       }}
@@ -286,6 +289,8 @@ const NodePortDetailModal = ({
                       {port.connectionName ||
                         `${port.connectionType} #${port.connectedOdpId || port.connectedOdcId}`}
                     </div>
+                      );
+                    })()}
                     <div className="text-muted mt-1" style={{ fontSize: '10px' }}>
                       Type:{' '}
                       <span className="badge bg-light text-dark border">

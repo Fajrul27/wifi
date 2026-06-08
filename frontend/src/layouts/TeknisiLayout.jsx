@@ -93,8 +93,8 @@ export default function TeknisiLayout({ children }) {
       try {
         const res = await api.get("/auth/me");
         if (res.data?.user) setUser(res.data.user);
-      } catch (err) {
-        console.log(err);
+      } catch {
+        setUser(null);
       }
     };
 
@@ -113,8 +113,8 @@ export default function TeknisiLayout({ children }) {
       await api.post("/auth/logout");
 
       navigate("/");
-    } catch (err) {
-      console.log(err);
+    } catch {
+      navigate("/");
     } finally {
       setLoadingLogout(false);
       setShowLogoutConfirm(false);
