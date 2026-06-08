@@ -5,6 +5,9 @@ const router = express.Router();
 const controller = require(
   "../../controllers/admin/pppoe.controller"
 );
+const authorize = require("../../Middleware/role.middleware");
+
+const adminOnly = authorize(["ADMIN"]);
 
 /* =========================
    ENGINE CONTROL
@@ -13,6 +16,7 @@ const controller = require(
 // sync + start realtime engine
 router.post(
   "/:routerId/sync",
+  adminOnly,
   controller.sync
 );
 
@@ -39,6 +43,7 @@ router.get(
 // update customer gps location
 router.put(
   "/:routerId/user/:id/location",
+  adminOnly,
   controller.updateLocation
 );
 
@@ -71,24 +76,28 @@ router.get(
 // add user
 router.post(
   "/:routerId/user",
+  adminOnly,
   controller.addUser
 );
 
 // edit user
 router.put(
   "/:routerId/user/:username",
+  adminOnly,
   controller.updateUser
 );
 
 // kick user
 router.post(
   "/:routerId/user/:username/kick",
+  adminOnly,
   controller.kickUser
 );
 
 // delete user
 router.delete(
   "/:routerId/user/:username",
+  adminOnly,
   controller.deleteUser
 );
 

@@ -92,6 +92,7 @@ const routes = [
     layout: TeknisiLayout,
     element: PPPoE,
     role: teknisiRole,
+    props: { readOnly: true },
   },
   {
     path: "/teknisi/profile",

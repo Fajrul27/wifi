@@ -210,7 +210,7 @@ const PaginationControls = ({ currentPage, totalPages, totalItems, itemsPerPage,
 // ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
-export default function PppoeDashboard() {
+export default function PppoeDashboard({ readOnly = false }) {
   /* ───────────────── STATE ───────────────── */
   const {
     selectedRouter,
@@ -292,6 +292,7 @@ export default function PppoeDashboard() {
 
   /* ───────────────── SYNC ───────────────── */
   const handleSync = async () => {
+    if (readOnly) return;
     if (!selectedRouter) return;
     try {
       await api.post(`/pppoe/${selectedRouter}/sync`);
@@ -305,10 +306,12 @@ export default function PppoeDashboard() {
   /* ───────────────── LOCATION MODAL ───────────────── */
 
   const openLocationModal = (user) => {
+    if (readOnly) return;
     setLocationUser(user);
   };
 
   const openEditModal = (user) => {
+    if (readOnly) return;
     setEditingUser(user);
     setShowEditModal(true);
   };
@@ -322,6 +325,7 @@ export default function PppoeDashboard() {
 
   /* ───────────────── DELETE HANDLER ───────────────── */
   const handleDelete = useCallback(async () => {
+    if (readOnly) return;
     if (!selectedRouter || !confirmDelete.user) return;
     const username = confirmDelete.user.username;
     const key = `delete-${username}`;
@@ -341,10 +345,11 @@ export default function PppoeDashboard() {
       setActionLoading(prev => ({ ...prev, [key]: false }));
       setConfirmDelete({ show: false, user: null });
     }
-  }, [selectedRouter, confirmDelete.user, loadUsers, triggerRowAnimation]);
+  }, [readOnly, selectedRouter, confirmDelete.user, loadUsers, triggerRowAnimation]);
 
   /* ───────────────── TOGGLE DISABLE/ENABLE HANDLER ───────────────── */
   const handleToggleDisable = useCallback(async (user) => {
+    if (readOnly) return;
     if (!selectedRouter) return;
     const username = user.username;
     const key = `toggle-${username}`;
@@ -392,10 +397,11 @@ export default function PppoeDashboard() {
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [selectedRouter, loadUsers, triggerRowAnimation, setPppoeUsers]);
+  }, [readOnly, selectedRouter, loadUsers, triggerRowAnimation, setPppoeUsers]);
 
   /* ───────────────── RECONNECT SESSION HANDLER ───────────────── */
   const handleReconnectUser = useCallback(async (user) => {
+    if (readOnly) return;
     if (!selectedRouter) return;
     const username = user.username;
     const key = `reconnect-${username}`;
@@ -420,7 +426,7 @@ export default function PppoeDashboard() {
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [selectedRouter, loadUsers, triggerRowAnimation]);
+  }, [readOnly, selectedRouter, loadUsers, triggerRowAnimation]);
 
   /* ───────────────── PAGINATED USERS ───────────────── */
   const paginatedUsers = useMemo(() => {
@@ -478,24 +484,35 @@ export default function PppoeDashboard() {
             <h3 className="fw-bold mb-1">
               <i className="bi bi-router me-2"></i>PPPoE Sessions
             </h3>
-            <p className="text-muted mb-0 small">Monitor & manage user connections</p>
+            <p className="text-muted mb-0 small">
+              {readOnly ? "Monitor user connections" : "Monitor & manage user connections"}
+            </p>
           </div>
           <div className="d-flex align-items-center gap-2">
             <ConnectionBadge connected={socketConnected && isRouterConnected} />
-            <button
-              className="btn btn-primary btn-sm d-flex align-items-center gap-2 btn-hover-scale"
-              onClick={() => setShowAddModal(true)}
-            >
-              <i className="bi bi-plus-lg"></i>
-              <span className="d-none d-sm-inline">Add User</span>
-            </button>
-            <button
-              className="btn btn-warning btn-sm d-flex align-items-center gap-2 btn-hover-scale"
-              onClick={handleSync}
-            >
-              <i className="bi bi-arrow-clockwise"></i>
-              <span className="d-none d-sm-inline">Sync</span>
-            </button>
+            {readOnly ? (
+              <span className="badge rounded-pill bg-secondary-subtle text-secondary-emphasis px-3 py-2">
+                <i className="bi bi-eye me-1"></i>
+                View Only
+              </span>
+            ) : (
+              <>
+                <button
+                  className="btn btn-primary btn-sm d-flex align-items-center gap-2 btn-hover-scale"
+                  onClick={() => setShowAddModal(true)}
+                >
+                  <i className="bi bi-plus-lg"></i>
+                  <span className="d-none d-sm-inline">Add User</span>
+                </button>
+                <button
+                  className="btn btn-warning btn-sm d-flex align-items-center gap-2 btn-hover-scale"
+                  onClick={handleSync}
+                >
+                  <i className="bi bi-arrow-clockwise"></i>
+                  <span className="d-none d-sm-inline">Sync</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -648,13 +665,13 @@ export default function PppoeDashboard() {
                   <th className="text-end">RX</th>
                   <th className="text-end">TX</th>
                   <th>Location</th>
-                  <th className="text-end" style={{ width: "100px" }}>Actions</th>
+                  {!readOnly && <th className="text-end" style={{ width: "100px" }}>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {usersLoading && !filteredUsers.length ? (
                   <tr>
-                    <td colSpan="9" className="text-center py-5">
+                    <td colSpan={readOnly ? 8 : 9} className="text-center py-5">
                       <div className="spinner-border text-primary" role="status">
                         <span className="visually-hidden">Loading...</span>
                       </div>
@@ -662,14 +679,14 @@ export default function PppoeDashboard() {
                   </tr>
                 ) : !paginatedUsers.length && filteredUsers.length > 0 ? (
                   <tr>
-                    <td colSpan="9" className="text-center py-5 text-muted">
+                    <td colSpan={readOnly ? 8 : 9} className="text-center py-5 text-muted">
                       <i className="bi bi-inbox fs-1 d-block mb-2"></i>
                       <p className="mb-0">Halaman kosong. Coba ubah nomor halaman atau filter.</p>
                     </td>
                   </tr>
                 ) : !filteredUsers.length ? (
                   <tr>
-                    <td colSpan="9" className="text-center py-5 text-muted">
+                    <td colSpan={readOnly ? 8 : 9} className="text-center py-5 text-muted">
                       <i className="bi bi-inbox fs-1 d-block mb-2"></i>
                       <p className="mb-0">No data found matching your filters</p>
                     </td>
@@ -753,7 +770,7 @@ export default function PppoeDashboard() {
                               <i className="bi bi-geo-alt-fill me-1"></i>
                               {parseFloat(u.latitude).toFixed(3)}, {parseFloat(u.longitude).toFixed(3)}
                             </a>
-                          ) : (
+                          ) : !readOnly ? (
                             <button
                               className="btn btn-sm btn-link p-0 text-muted small"
                               onClick={() => openLocationModal(u)}
@@ -761,50 +778,54 @@ export default function PppoeDashboard() {
                             >
                               <i className="bi bi-plus-circle me-1"></i>Add
                             </button>
+                          ) : (
+                            <span className="text-muted small">-</span>
                           )}
                         </td>
                         
                         {/* ✅ ACTIONS: Edit, Toggle Enable/Disable, Kick (online only), Location, Delete */}
-                        <td className="text-end">
-                          <div className="d-flex justify-content-end gap-1">
-                            <ActionButton
-                              icon="pencil"
-                              title="Edit Secret"
-                              variant="primary"
-                              onClick={() => openEditModal(u)}
-                              loading={actionLoading[`edit-${u.username}`]}
-                            />
-                            <ActionButton
-                              icon={u.disabled ? "play-fill" : "pause-fill"}
-                              title={u.disabled ? "Enable Secret" : "Disable Secret"}
-                              variant={u.disabled ? "success" : "warning"}
-                              onClick={() => handleToggleDisable(u)}
-                              loading={actionLoading[`toggle-${u.username}`]}
-                            />
-                            <ActionButton
-                              icon="arrow-clockwise"
-                              title="Reconnect Session"
-                              variant="info"
-                              disabled={!u.isOnline}
-                              onClick={() => handleReconnectUser(u)}
-                              loading={actionLoading[`reconnect-${u.username}`]}
-                            />
-                            <ActionButton
-                              icon="geo-alt"
-                              title="Edit Location"
-                              variant="link"
-                              onClick={() => openLocationModal(u)}
-                              loading={actionLoading[`location-${u.username}`]}
-                            />
-                            <ActionButton
-                              icon="trash"
-                              title="Delete User"
-                              variant="danger"
-                              onClick={() => setConfirmDelete({ show: true, user: u })}
-                              loading={actionLoading[`delete-${u.username}`]}
-                            />
-                          </div>
-                        </td>
+                        {!readOnly && (
+                          <td className="text-end">
+                            <div className="d-flex justify-content-end gap-1">
+                              <ActionButton
+                                icon="pencil"
+                                title="Edit Secret"
+                                variant="primary"
+                                onClick={() => openEditModal(u)}
+                                loading={actionLoading[`edit-${u.username}`]}
+                              />
+                              <ActionButton
+                                icon={u.disabled ? "play-fill" : "pause-fill"}
+                                title={u.disabled ? "Enable Secret" : "Disable Secret"}
+                                variant={u.disabled ? "success" : "warning"}
+                                onClick={() => handleToggleDisable(u)}
+                                loading={actionLoading[`toggle-${u.username}`]}
+                              />
+                              <ActionButton
+                                icon="arrow-clockwise"
+                                title="Reconnect Session"
+                                variant="info"
+                                disabled={!u.isOnline}
+                                onClick={() => handleReconnectUser(u)}
+                                loading={actionLoading[`reconnect-${u.username}`]}
+                              />
+                              <ActionButton
+                                icon="geo-alt"
+                                title="Edit Location"
+                                variant="link"
+                                onClick={() => openLocationModal(u)}
+                                loading={actionLoading[`location-${u.username}`]}
+                              />
+                              <ActionButton
+                                icon="trash"
+                                title="Delete User"
+                                variant="danger"
+                                onClick={() => setConfirmDelete({ show: true, user: u })}
+                                loading={actionLoading[`delete-${u.username}`]}
+                              />
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -826,26 +847,30 @@ export default function PppoeDashboard() {
 
   
         {/* DELETE CONFIRMATION */}
-        <ConfirmDialog
-          show={confirmDelete.show}
-          title="Confirm Delete"
-          message={`Are you sure you want to delete user "${confirmDelete.user?.username}"? This action cannot be undone.`}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete({ show: false, user: null })}
-        />
+        {!readOnly && (
+          <ConfirmDialog
+            show={confirmDelete.show}
+            title="Confirm Delete"
+            message={`Are you sure you want to delete user "${confirmDelete.user?.username}"? This action cannot be undone.`}
+            onConfirm={handleDelete}
+            onCancel={() => setConfirmDelete({ show: false, user: null })}
+          />
+        )}
 
         {/* ADD MODAL */}
-        <AddSecret
-          show={showAddModal}
-          onClose={() => setShowAddModal(false)}
-          routerId={selectedRouter}
-          onSaved={async () => {
-            await loadUsers(selectedRouter);
-          }}
-        />
+        {!readOnly && (
+          <AddSecret
+            show={showAddModal}
+            onClose={() => setShowAddModal(false)}
+            routerId={selectedRouter}
+            onSaved={async () => {
+              await loadUsers(selectedRouter);
+            }}
+          />
+        )}
 
         {/* EDIT MODAL */}
-        {editingUser && (
+        {!readOnly && editingUser && (
           <EditSecret
             show={showEditModal}
             username={editingUser.username}
@@ -862,15 +887,17 @@ export default function PppoeDashboard() {
         )}
 
         {/* LOCATION MODAL */}
-        <LocationModal
-          show={!!locationUser}
-          user={locationUser}
-          routerId={selectedRouter}
-          onClose={() => setLocationUser(null)}
-          onSaved={async () => {
-            await loadUsers(selectedRouter);
-          }}
-        />
+        {!readOnly && (
+          <LocationModal
+            show={!!locationUser}
+            user={locationUser}
+            routerId={selectedRouter}
+            onClose={() => setLocationUser(null)}
+            onSaved={async () => {
+              await loadUsers(selectedRouter);
+            }}
+          />
+        )}
       </div>
     </>
   );

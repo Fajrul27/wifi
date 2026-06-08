@@ -15,7 +15,7 @@ export default function App() {
               const Layout = r.layout;
               const content = (
                 <Layout>
-                  <Page />
+                  <Page {...(r.props || {})} />
                 </Layout>
               );
 
@@ -39,10 +39,10 @@ export default function App() {
                 element={
                   r.role ? (
                     <ProtectedRoute role={r.role}>
-                      <Page />
+                      <Page {...(r.props || {})} />
                     </ProtectedRoute>
                   ) : (
-                    <Page />
+                    <Page {...(r.props || {})} />
                   )
                 }
               />
