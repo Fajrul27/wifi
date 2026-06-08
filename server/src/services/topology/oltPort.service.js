@@ -9,28 +9,29 @@ class OltPortService {
 
   async create(data) {
 
-    if (!data.routerId || !data.name || !data.port) {
-      throw new Error("routerId, name, dan port wajib diisi");
+    if (!data.oltId || data.index === undefined) {
+      throw new Error("oltId dan index wajib diisi");
     }
 
-    const routerId = Number(data.routerId);
+    const oltId = Number(data.oltId);
+    const index = Number(data.index);
 
-    if (isNaN(routerId)) {
-      throw new Error("routerId tidak valid");
+    if (isNaN(oltId) || isNaN(index)) {
+      throw new Error("oltId dan index harus berupa angka");
     }
 
     // =====================================================
-    // CHECK ROUTER
+    // CHECK OLT EXISTS
     // =====================================================
 
-    const router = await prisma.router.findUnique({
+    const olt = await prisma.olt.findUnique({
       where: {
-        id: routerId,
+        id: oltId,
       },
     });
 
-    if (!router) {
-      throw new Error("Router tidak ditemukan");
+    if (!olt) {
+      throw new Error("OLT tidak ditemukan");
     }
 
     // =====================================================
@@ -39,13 +40,13 @@ class OltPortService {
 
     const existingPort = await prisma.oltPort.findFirst({
       where: {
-        routerId,
-        port: data.port.trim(),
+        oltId,
+        index,
       },
     });
 
     if (existingPort) {
-      throw new Error("Port sudah digunakan pada router ini");
+      throw new Error("Port dengan index ini sudah ada pada OLT ini");
     }
 
     // =====================================================
@@ -54,28 +55,42 @@ class OltPortService {
 
     return await prisma.oltPort.create({
       data: {
-        routerId,
-
-        name: data.name.trim(),
-        port: data.port.trim(),
-
-        latitude: data.latitude ?? null,
-        longitude: data.longitude ?? null,
+        oltId,
+        index,
+        isUsed: data.isUsed ?? false,
+        roadCoordinates: data.roadCoordinates ?? null,
       },
 
       include: {
-        router: {
+        olt: {
           select: {
             id: true,
             name: true,
-            host: true,
-            port: true,
-            isOnline: true,
+            routerId: true,
             latitude: true,
             longitude: true,
-            lastSeen: true,
-            createdAt: true,
-            updatedAt: true,
+            router: {
+              select: {
+                id: true,
+                name: true,
+                host: true,
+                port: true,
+                isOnline: true,
+                latitude: true,
+                longitude: true,
+                lastSeen: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
+          },
+        },
+        odcs: {
+          select: {
+            id: true,
+            name: true,
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -210,23 +225,31 @@ class OltPortService {
       },
 
       include: {
-
-        router: {
+        olt: {
           select: {
             id: true,
             name: true,
-            host: true,
-            port: true,
-            isOnline: true,
+            routerId: true,
             latitude: true,
             longitude: true,
-            lastSeen: true,
-            createdAt: true,
-            updatedAt: true,
+            router: {
+              select: {
+                id: true,
+                name: true,
+                host: true,
+                port: true,
+                isOnline: true,
+                latitude: true,
+                longitude: true,
+                lastSeen: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
           },
         },
 
-        nodes: {
+        odcs: {
           select: {
             id: true,
             name: true,
@@ -239,7 +262,7 @@ class OltPortService {
 
         _count: {
           select: {
-            nodes: true,
+            odcs: true,
           },
         },
       },
@@ -275,80 +298,47 @@ class OltPortService {
     }
 
     // =====================================================
-    // CHECK DUPLICATE PORT
-    // =====================================================
-
-    if (data.port) {
-
-      const duplicate = await prisma.oltPort.findFirst({
-        where: {
-          routerId: existing.routerId,
-          port: data.port.trim(),
-
-          NOT: {
-            id: portId,
-          },
-        },
-      });
-
-      if (duplicate) {
-        throw new Error("Port sudah digunakan");
-      }
-    }
-
-    // =====================================================
     // UPDATE
     // =====================================================
 
     let roadCoordsVal = data.roadCoordinates;
-    const finalLat = data.latitude !== undefined ? (data.latitude === null || data.latitude === "" ? null : Number(data.latitude)) : (existing.latitude !== null ? Number(existing.latitude) : null);
-    const finalLng = data.longitude !== undefined ? (data.longitude === null || data.longitude === "" ? null : Number(data.longitude)) : (existing.longitude !== null ? Number(existing.longitude) : null);
-    
-    const isMoved = (data.latitude !== undefined && Number(data.latitude) !== (existing.latitude !== null ? Number(existing.latitude) : null)) ||
-                    (data.longitude !== undefined && Number(data.longitude) !== (existing.longitude !== null ? Number(existing.longitude) : null));
-
-    if (roadCoordsVal === null || (isMoved && !data.roadCoordinates)) {
-      let parentLat = null;
-      let parentLng = null;
-      const router = await prisma.router.findUnique({ where: { id: existing.routerId } });
-      if (router && router.latitude !== null && router.longitude !== null) {
-        parentLat = Number(router.latitude);
-        parentLng = Number(router.longitude);
-      }
-      
-      if (parentLat !== null && parentLng !== null && finalLat !== null && finalLng !== null) {
-        const { getRoadRoute } = require("../../../utils/routing");
-        const coords = await getRoadRoute(parentLat, parentLng, finalLat, finalLng);
-        if (coords) {
-          roadCoordsVal = JSON.stringify(coords);
-        }
-      }
-    }
 
     return await prisma.oltPort.update({
       where: {
         id: portId,
       },
       data: {
-        name: data.name?.trim(),
-        port: data.port?.trim(),
-        latitude: data.latitude,
-        longitude: data.longitude,
         roadCoordinates: roadCoordsVal !== undefined ? roadCoordsVal : undefined,
       },
 
       include: {
-
-        router: {
+        olt: {
           select: {
             id: true,
             name: true,
-            host: true,
-            port: true,
-            isOnline: true,
+            routerId: true,
             latitude: true,
             longitude: true,
-            lastSeen: true,
+            router: {
+              select: {
+                id: true,
+                name: true,
+                host: true,
+                port: true,
+                isOnline: true,
+                latitude: true,
+                longitude: true,
+                lastSeen: true,
+              },
+            },
+          },
+        },
+        odcs: {
+          select: {
+            id: true,
+            name: true,
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -375,7 +365,7 @@ class OltPortService {
       include: {
         _count: {
           select: {
-            nodes: true,
+            odcs: true,
           },
         },
       },
@@ -389,7 +379,7 @@ class OltPortService {
     // PROTECT TOPOLOGY
     // =====================================================
 
-    if (port._count.nodes > 0) {
+    if (port._count.odcs > 0) {
       throw new Error("OLT Port sedang digunakan topology");
     }
 
@@ -510,16 +500,22 @@ class OltPortService {
     // Ambil semua interface dari Mikrotik
     const interfaces = await pppoeService.client.write("/interface/print");
     
-    // Ambil port yang sudah terdaftar di database
-    const existingPorts = await prisma.oltPort.findMany({
+    // Ambil port yang sudah terdaftar di database melalui OLT
+    const existingOlts = await prisma.olt.findMany({
       where: { routerId: Number(routerId) },
-      select: { port: true }
+      include: {
+        ports: {
+          select: { index: true }
+        }
+      }
     });
-    const existingPortNames = existingPorts.map(p => p.port);
+
+    // Collect semua index yang sudah digunakan
+    const existingIndices = existingOlts.flatMap(olt => olt.ports.map(p => p.index));
 
     // Filter interface yang belum ada di database
     const available = interfaces
-      .filter(i => !existingPortNames.includes(i.name))
+      .filter(i => !existingIndices.includes(Number(i.name)))
       .map(i => ({
         name: i.name,
         type: i.type,
