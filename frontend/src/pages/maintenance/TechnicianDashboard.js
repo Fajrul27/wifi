@@ -294,7 +294,7 @@ export default function TechnicianDashboard({
 
   const [, setApiSelectedRouter_local] = useState(null);
   const setApiSelectedRouter = isStandalone ? ctxSetSelectedRouter : setApiSelectedRouter_local;
-  const eventLogs = isStandalone ? ctxEventLogs : [];
+  const eventLogs = ctxEventLogs; // Always use context eventLogs as it's global system logs
 
   const [lightbox, setLightbox] = useState({ isOpen: false, index: 0, images: [] });
   const [selectedCable, setSelectedCable] = useState(null);
@@ -1667,202 +1667,162 @@ export default function TechnicianDashboard({
           />
 
           <div className="row g-3 flex-grow-1" style={{ minHeight: 0 }}>
-            {/* Main Map Section */}
-            <div className={isFullScreen ? "position-fixed top-0 start-0 end-0 bottom-0 bg-white" : "col-lg-9 col-xl-9 h-100"} style={isFullScreen ? { zIndex: 1040, margin: 0, padding: 0 } : {}}>
-              <div className={`card border-0 shadow-sm overflow-hidden position-relative ${isFullScreen ? 'rounded-0 w-100 h-100' : 'rounded-4 h-100'}`}>
+            {/* PPPoE Sessions List - Main Section */}
+            <div className="col-lg-9 col-xl-9 h-100">
+              <div className="card border-0 shadow-sm overflow-hidden rounded-4 h-100 d-flex flex-column">
                 
-                {/* Map Top UI Overlays */}
-                <div className="position-absolute top-0 start-0 w-100 p-3 d-flex justify-content-between align-items-start z-1000" style={{ pointerEvents: 'none' }}>
-                    
-                    {/* Search & Filters */}
-                    <div className="d-flex flex-column gap-2" style={{ pointerEvents: 'auto', width: '320px' }}>
-                        <form onSubmit={handleSearchSubmit} className="position-relative">
-                            <i className="bi bi-search position-absolute top-50 start-0 translate-middle-y ms-3 text-muted" style={{ zIndex: 1, pointerEvents: 'none' }}></i>
-                            <input 
-                                type="text" 
-                                className="form-control rounded-pill border-0 shadow-sm ps-5 pe-4 py-2 fw-medium" 
-                                placeholder="Find client or node..." 
-                                value={searchTerm}
-                                autoComplete="off"
-                                onChange={(e) => { setSearchTerm(e.target.value); setShowSearchResults(true); }}
-                                onFocus={() => setShowSearchResults(true)}
-                                onBlur={() => setTimeout(() => setShowSearchResults(false), 150)}
-                            />
-                            {searchTerm && (
-                              <button type="button" className="btn btn-sm position-absolute top-50 end-0 translate-middle-y me-2 p-0 text-muted border-0 bg-transparent" onClick={() => { setSearchTerm(""); setShowSearchResults(false); }}>
-                                <i className="bi bi-x-circle-fill" style={{ fontSize: '14px' }}></i>
-                              </button>
-                            )}
-                            {showSearchResults && searchResults.length > 0 && (
-                              <div 
-                                className="position-absolute top-100 start-0 w-100 mt-1 rounded-3 overflow-hidden shadow-lg search-dropdown custom-scrollbar" 
-                                style={{ zIndex: 9999, maxHeight: '378px', overflowY: 'auto', pointerEvents: 'auto' }}
-                                onScroll={handleSearchScroll}
-                              >
-                                {searchResults.slice(0, visibleSearchCount).map((item) => (
-                                  <button
-                                    key={`${item._type}-${item.id}`}
-                                    type="button"
-                                    className="search-dropdown-item w-100 d-flex align-items-center gap-2 px-3 py-2 border-0 text-start"
-                                    onMouseDown={() => handleSearchSelect(item)}
-                                  >
-                                    <span className="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0" style={{ width: '28px', height: '28px', background: item._color, fontSize: '12px' }}>
-                                      <i className={`bi ${item._icon}`}></i>
-                                    </span>
-                                    <div className="overflow-hidden">
-                                      <div className="fw-medium text-truncate" style={{ fontSize: '13px' }}>{item._label}</div>
-                                      <div className="text-muted" style={{ fontSize: '11px', textTransform: 'capitalize' }}>{item._type === 'client' ? (item.isOnline ? '🟢 Online' : '🔴 Offline') : item._type}</div>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                        </form>
-
-                        <details className="bg-body rounded-4 mt-2 group shadow-sm border" style={{ cursor: 'pointer' }}>
-                            <summary className="p-3 fw-bold text-muted small text-uppercase" style={{ listStyle: 'none' }}>
-                                <div className="d-flex justify-content-between align-items-center">
-                                    <span><i className="bi bi-layers me-2"></i>Map Layers</span>
-                                    <i className="bi bi-chevron-down"></i>
-                                </div>
-                            </summary>
-                            <div className="p-3 pt-0">
-                                <div className="form-check form-switch mb-2">
-                                    <input className="form-check-input" type="checkbox" role="switch" checked={showClients} onChange={(e) => setShowClients(e.target.checked)} />
-                                    <label className="form-check-label small fw-medium">
-                                        Show Clients {showClients && !shouldShowClients && <span className="text-muted ms-1" style={{ fontSize: '10px' }}>(Zoom in to view)</span>}
-                                    </label>
-                                </div>
-                                <div className="form-check form-switch mb-2">
-                                    <input className="form-check-input" type="checkbox" role="switch" checked={showNodes} onChange={(e) => setShowNodes(e.target.checked)} />
-                                    <label className="form-check-label small fw-medium">Show ODC/ODP Nodes</label>
-                                </div>
-                                <div className="form-check form-switch mb-0">
-                                    <input className="form-check-input" type="checkbox" role="switch" checked={showLines} onChange={(e) => setShowLines(e.target.checked)} />
-                                    <label className="form-check-label small fw-medium">Show Connections</label>
-                                </div>
-                            </div>
-                        </details>
+                {/* Header */}
+                <div className="card-header bg-white border-bottom p-3">
+                  <div className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                      <h5 className="fw-bold mb-0 text-body-emphasis">
+                        <i className="bi bi-router me-2 text-primary"></i>PPPoE Sessions
+                      </h5>
+                      <small className="text-muted">Active connections on {selectedRouter ? routers.find(r => r.id === selectedRouter)?.name || 'Router' : 'all routers'}</small>
                     </div>
-
-                    {/* Satellite Toggle */}
-                    <div className="bg-body rounded-pill p-1 d-flex shadow-sm border" style={{ pointerEvents: 'auto' }}>
-                        <button 
-                            className={`btn btn-sm rounded-pill px-3 fw-medium ${mapType === 'vector' ? 'btn-primary' : 'btn-link text-body bg-transparent border-0 text-decoration-none'}`}
-                            onClick={() => setMapType('vector')}
-                        >
-                            Vector
-                        </button>
-                        <button 
-                            className={`btn btn-sm rounded-pill px-3 fw-medium ${mapType === 'satellite' ? 'btn-primary' : 'btn-link text-body bg-transparent border-0 text-decoration-none'}`}
-                            onClick={() => setMapType('satellite')}
-                        >
-                            Satellite
-                        </button>
-                    </div>
-                </div>
-
-                <MapContainer 
-                    center={mapCenter} 
-                    zoom={8} 
-                    scrollWheelZoom={true} 
-                    style={{ height: '100%', width: '100%', outline: 'none' }}
-                    zoomControl={false}
-                    ref={setMapInstance}
-                    renderer={canvasRenderer}
-                    preferCanvas={true}
-                    keyboard={false}
-                >
-                    <MapViewportListener onBoundsChange={setVisibleBounds} onZoomChange={setMapZoom} />
-                    {mapType === 'vector' ? (
-                        <>
-                            {isDarkMode ? (
-                                <TileLayer
-                                    key="dark-tile"
-                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                                    maxZoom={20}
-                                />
-                            ) : (
-                                <TileLayer
-                                    key="light-tile"
-                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                                    maxZoom={20}
-                                />
-                            )}
-                        </>
-                    ) : (
-                        <TileLayer
-                            attribution='&copy; <a href="https://www.google.com/maps">Google Maps</a>'
-                            url="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
-                            maxZoom={22}
-                            subdomains={['mt0','mt1','mt2','mt3']}
-                        />
-                    )}
-                    {connectionLayers}
-                    {mapMarkers}
-
-                    <FitMapBounds coordinates={allCoordinates} selectedRouter={selectedRouter} />
-                </MapContainer>
-
-                {/* Bottom Controls */}
-                <div className="position-absolute bottom-0 end-0 p-3 z-1000 d-flex flex-column gap-2" style={{ pointerEvents: 'none' }}>
-                    <button 
-                        className="btn btn-white text-primary border-0 shadow rounded-circle d-flex align-items-center justify-content-center" 
-                        style={{ width: '48px', height: '48px', pointerEvents: 'auto' }}
-                        onClick={() => {
-                            requestAnimationFrame(() => {
-                                if (allCoordinates.length > 0 && mapInstance) {
-                                    const validPoints = [];
-                                    for (let i = 0; i < allCoordinates.length; i++) {
-                                        const c = allCoordinates[i];
-                                        if (c && c.lat != null && c.lng != null && !isNaN(c.lat) && !isNaN(c.lng)) {
-                                            validPoints.push([c.lat, c.lng]);
-                                        }
-                                    }
-                                    if (validPoints.length > 0) {
-                                        const targetBounds = L.latLngBounds(validPoints).pad(0.1);
-                                        mapInstance.stop();
-                                        
-                                        const targetZoom = mapInstance.getBoundsZoom(targetBounds);
-                                        const currentZoom = mapInstance.getZoom();
-                                        const dist = mapInstance.getCenter().distanceTo(targetBounds.getCenter());
-                                        
-                                        if (dist < 1000 && Math.abs(currentZoom - targetZoom) <= 1) {
-                                            mapInstance.fitBounds(targetBounds, { animate: true, duration: 0.5 });
-                                        } else {
-                                            mapInstance.flyToBounds(targetBounds, { duration: 1.5, maxZoom: 16, easeLinearity: 0.25 });
-                                        }
-                                    }
-                                }
-                            });
-                        }}
-                        title="Fit Bounds to Markers"
-                    >
-                        <i className="bi bi-bullseye fs-5"></i>
-                    </button>
-                    <button 
-                        className={`btn ${isFullScreen ? 'btn-danger' : 'btn-primary'} text-white border-0 shadow rounded-circle d-flex align-items-center justify-content-center`} 
-                        style={{ width: '48px', height: '48px', pointerEvents: 'auto' }}
-                        onClick={() => setIsFullScreen(!isFullScreen)}
-                        title="Toggle Fullscreen"
-                    >
-                        <i className={`bi ${isFullScreen ? 'bi-fullscreen-exit' : 'bi-arrows-fullscreen'} fs-5`}></i>
-                    </button>
-                </div>
-
-                {/* Cable Detail Panel */}
-                {selectedCable && (
-                  <div className="cable-edit-panel" style={{ pointerEvents: 'auto' }}>
-                    <div className="cable-edit-header">
-                      <h3 className="text-body-emphasis">Detail Koneksi Kabel</h3>
-                      <button className="close-btn" onClick={() => setSelectedCable(null)}>×</button>
-                    </div>
-                    <div className="cable-edit-body">
-                      <p className="cable-label text-body-emphasis"><strong>Kabel:</strong> {selectedCable.label}</p>
+                    <div className="d-flex align-items-center gap-2">
+                      <ConnectionBadge connected={monitorSocketConnected && isRouterConnected} />
+                      <button
+                        className="btn btn-warning btn-sm d-flex align-items-center gap-2"
+                        onClick={handleSync}
+                        title="Sync sessions"
+                      >
+                        <i className="bi bi-arrow-clockwise"></i>
+                        <span className="d-none d-sm-inline">Sync</span>
+                      </button>
                     </div>
                   </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-grow-1 overflow-auto custom-scrollbar">
+                  {pppoeFilteredUsers.length === 0 ? (
+                    <div className="d-flex flex-column align-items-center justify-content-center h-100 text-muted py-5">
+                      <i className="bi bi-inbox fs-1 mb-2 opacity-50"></i>
+                      <p className="small">Tidak ada user PPPoE aktif</p>
+                    </div>
+                  ) : (
+                    <table className="table table-sm table-hover mb-0">
+                      <thead className="bg-light sticky-top">
+                        <tr>
+                          <th>#</th>
+                          <th>Username</th>
+                          <th>Status</th>
+                          <th>IP Address</th>
+                          <th>Uptime/Downtime</th>
+                          <th className="text-end">RX</th>
+                          <th className="text-end">TX</th>
+                          <th>Location</th>
+                          <th className="text-end">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pppoeFilteredUsers
+                          .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                          .map((u, idx) => {
+                          const globalIndex = (currentPage - 1) * itemsPerPage + idx + 1;
+                          return (
+                            <tr key={u.id || u.username}>
+                              <td>{globalIndex}</td>
+                              <td>
+                                <div className="fw-medium text-body-emphasis">{u.username || "-"}</div>
+                              </td>
+                              <td>
+                                {u.disabled ? (
+                                  <span className="badge rounded-pill px-3 py-2 bg-secondary-subtle text-secondary-emphasis">
+                                    <i className="bi bi-slash-circle-fill me-1" />
+                                    Disabled
+                                  </span>
+                                ) : (
+                                  <StatusBadge online={u.isOnline} />
+                                )}
+                              </td>
+                              <td>
+                                {(u.ip || u.remoteAddress) ? (
+                                  <a
+                                    href={`http://${u.ip || u.remoteAddress}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-decoration-none"
+                                    title="Open IP in new tab"
+                                  >
+                                    <code className="small bg-light px-2 py-1 rounded text-primary">
+                                      {u.ip || u.remoteAddress}
+                                    </code>
+                                  </a>
+                                ) : (
+                                  <code className="small bg-light px-2 py-1 rounded text-muted">-</code>
+                                )}
+                              </td>
+                              <td>
+                                {u.isOnline ? (
+                                  <div>
+                                    <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 small fw-semibold">
+                                      <i className="bi bi-clock-fill me-1" />
+                                      {u.uptime || "-"}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 small fw-semibold">
+                                      <i className="bi bi-clock me-1" />
+                                      {u.downtime || "-"}
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="text-end">
+                                <span className="text-success fw-medium">{formatTraffic(u.rx)}</span>
+                              </td>
+                              <td className="text-end">
+                                <span className="text-primary fw-medium">{formatTraffic(u.tx)}</span>
+                              </td>
+                              <td>
+                                {u.latitude && u.longitude ? (
+                                  <a
+                                    href={`https://maps.google.com/?q=${u.latitude},${u.longitude}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-decoration-none small text-danger fw-medium"
+                                    title="Open in Google Maps"
+                                  >
+                                    <i className="bi bi-geo-alt-fill me-1"></i>
+                                    View
+                                  </a>
+                                ) : (
+                                  <span className="text-muted small">-</span>
+                                )}
+                              </td>
+                              <td className="text-end">
+                                <div className="d-flex justify-content-end gap-1">
+                                  <ActionButton
+                                    icon="arrow-clockwise"
+                                    title="Reconnect Session"
+                                    variant="info"
+                                    disabled={!u.isOnline}
+                                    onClick={() => handleReconnectUser(u)}
+                                    loading={actionLoading[`reconnect-${u.username}`]}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Pagination */}
+                {pppoeFilteredUsers.length > 0 && (
+                  <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={pppoeFilteredUsers.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    onItemsPerPageChange={(val) => { setItemsPerPage(val); setCurrentPage(1); }}
+                  />
                 )}
               </div>
             </div>
@@ -1872,285 +1832,6 @@ export default function TechnicianDashboard({
               <DashboardBandwidthChart routersTrafficRef={routersTrafficRef} isDarkMode={isDarkMode} selectedRouter={selectedRouter} />
               <DashboardSystemLogs eventLogs={eventLogs} />
             </div>
-          </div>
-
-        </div>
-
-        {/* ========================================================= */}
-        {/* PPPoE USER SESSIONS LIST SECTION                          */}
-        {/* ========================================================= */}
-        <div className="mt-2 mb-4">
-          
-          {/* HEADER */}
-          <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-            <div>
-              <h3 className="fw-bold mb-1 text-body-emphasis">
-                <i className="bi bi-router me-2 text-primary"></i>PPPoE Sessions
-              </h3>
-              <p className="text-muted mb-0 small">Monitor user connections active on the selected router</p>
-            </div>
-            <div className="d-flex align-items-center gap-2">
-              <ConnectionBadge connected={monitorSocketConnected && isRouterConnected} />
-              <button
-                className="btn btn-warning btn-sm d-flex align-items-center gap-2 btn-hover-scale"
-                onClick={handleSync}
-              >
-                <i className="bi bi-arrow-clockwise"></i>
-                <span className="d-none d-sm-inline">Sync</span>
-              </button>
-            </div>
-          </div>
-
-          {/* CONTROL BAR */}
-          <div className="card border-0 shadow-sm mb-3 rounded-4">
-            <div className="card-body py-3">
-              <div className="row g-2 align-items-end">
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Search</label>
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Username..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Status</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                  >
-                    <option value="all">All</option>
-                    <option value="online">Online</option>
-                    <option value="offline">Offline</option>
-                  </select>
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Location</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={locationFilter}
-                    onChange={(e) => setLocationFilter(e.target.value)}
-                  >
-                    <option value="all">All</option>
-                    <option value="has-location">📍 Has Location</option>
-                    <option value="no-location">❌ No Location</option>
-                  </select>
-                </div>
-                <div className="col-md-3">
-                  <label className="form-label small text-muted fw-semibold mb-1">Sort By</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                  >
-                    <option value="name-asc">Name ↑</option>
-                    <option value="name-desc">Name ↓</option>
-                    <option value="uptime-desc">Uptime ↓</option>
-                    <option value="uptime-asc">Uptime ↑</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ROUTER METRICS */}
-          <div className="row g-3 mb-4">
-            {["CPU Load", "RAM Usage", "RX Traffic", "TX Traffic"].map((label, idx) => {
-              const values = [cpu, ram, rx, tx];
-              const colors = ["text-danger", "text-warning", "text-success", "text-primary"];
-              const format = idx < 2 ? formatPercent : formatTraffic;
-              return (
-                <div className="col-6 col-md-3" key={label}>
-                  <div className="card border-0 shadow-sm h-100 rounded-4">
-                    <div className="card-body py-3">
-                      <div className="small text-muted text-uppercase fw-semibold mb-1">{label}</div>
-                      <div className={`fs-4 fw-bold ${colors[idx]}`}>{format(values[idx])}</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* USERS TABLE WITH PAGINATION */}
-          <div className="card border-0 shadow-sm rounded-4 overflow-hidden">
-            <div className="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-              <h5 className="mb-0 fw-semibold text-body-emphasis">
-                <i className="bi bi-people me-2"></i>User Sessions
-                <span className="badge bg-secondary ms-2">{pppoeFilteredUsers.length}</span>
-              </h5>
-              <div className="small text-muted">
-                <span className="text-success">{pppoeOnlineUsers} online</span> •{" "}
-                <span className="text-danger">{pppoeOfflineCount} offline</span> •{" "}
-                <span className="text-primary">{pppoeLocatedCount} located</span>
-              </div>
-            </div>
-            
-            {/* Pagination Top */}
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={pppoeFilteredUsers.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(val) => { setItemsPerPage(val); setCurrentPage(1); }}
-            />
-            
-            <div className="table-container">
-              <table className="table table-hover align-middle mb-0">
-                <thead className="table-light sticky-top" style={{ zIndex: 1, background: "#fff" }}>
-                  <tr>
-                    <th style={{ width: "40px" }}>#</th>
-                    <th>User</th>
-                    <th>Status</th>
-                    <th>IP Address</th>
-                    <th>Uptime / Downtime</th>
-                    <th className="text-end">RX</th>
-                    <th className="text-end">TX</th>
-                    <th>Location</th>
-                    <th className="text-end" style={{ width: "80px" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersLoading && !pppoeFilteredUsers.length ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5">
-                        <div className="spinner-border text-primary" role="status">
-                          <span className="visually-hidden">Loading...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : !paginatedUsers.length && pppoeFilteredUsers.length > 0 ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5 text-muted">
-                        <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-                        <p className="mb-0">Halaman kosong. Coba ubah nomor halaman atau filter.</p>
-                      </td>
-                    </tr>
-                  ) : !pppoeFilteredUsers.length ? (
-                    <tr>
-                      <td colSpan="9" className="text-center py-5 text-muted">
-                        <i className="bi bi-inbox fs-1 d-block mb-2"></i>
-                        <p className="mb-0">No data found matching your filters</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedUsers.map((u, i) => {
-                      const globalIndex = (currentPage - 1) * itemsPerPage + i + 1;
-                      const isAnimating = animatingRows[u.username];
-                      return (
-                        <tr 
-                          key={String(u.id)} 
-                          className={`${u.isOnline ? "" : "opacity-75"} ${isAnimating ? "row-animate" : ""}`}
-                          style={{ transition: "background-color 0.3s ease, opacity 0.3s ease" }}
-                        >
-                          <td>{globalIndex}</td>
-                          <td>
-                            <div className="fw-medium text-body-emphasis">{u.username || "-"}</div>
-                            {u.service && <small className="text-muted d-block">{u.service}</small>}
-                          </td>
-                          <td>
-                            {u.disabled ? (
-                              <span className="badge rounded-pill px-3 py-2 bg-secondary-subtle text-secondary-emphasis">
-                                <i className="bi bi-slash-circle-fill me-1 text-secondary" style={{ fontSize: "0.6rem" }} />
-                                Disabled
-                              </span>
-                            ) : (
-                              <StatusBadge online={u.isOnline} />
-                            )}
-                          </td>
-                          <td>
-                            {(u.ip || u.remoteAddress) ? (
-                              <a
-                                href={`http://${u.ip || u.remoteAddress}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-decoration-none"
-                                title="Open IP in new tab"
-                              >
-                                <code className="small bg-light px-2 py-1 rounded text-primary">
-                                  {u.ip || u.remoteAddress}
-                                </code>
-                              </a>
-                            ) : (
-                              <code className="small bg-light px-2 py-1 rounded text-muted">-</code>
-                            )}
-                          </td>
-                          <td>
-                            {u.isOnline ? (
-                              <div>
-                                <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1 small fw-semibold">
-                                  <i className="bi bi-clock-fill me-1" />
-                                  {u.uptime || "-"}
-                                </span>
-                                <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Uptime</span>
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1 small fw-semibold">
-                                  <i className="bi bi-clock me-1" />
-                                  {u.downtime || "-"}
-                                </span>
-                                <span className="text-muted d-block mt-1" style={{ fontSize: "0.75rem" }}>Downtime</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="text-end">
-                            <span className="text-success fw-medium">{formatTraffic(u.rx)}</span>
-                          </td>
-                          <td className="text-end">
-                            <span className="text-primary fw-medium">{formatTraffic(u.tx)}</span>
-                          </td>
-                          <td>
-                            {u.latitude && u.longitude ? (
-                              <a
-                                href={`https://maps.google.com/?q=${u.latitude},${u.longitude}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-decoration-none small text-danger fw-medium"
-                                title="Open in Google Maps"
-                              >
-                                <i className="bi bi-geo-alt-fill me-1"></i>
-                                {parseFloat(u.latitude).toFixed(3)}, {parseFloat(u.longitude).toFixed(3)}
-                              </a>
-                            ) : (
-                              <span className="text-muted small">-</span>
-                            )}
-                          </td>
-                          
-                          {/* ACTIONS: Reconnect Session Only */}
-                          <td className="text-end">
-                            <div className="d-flex justify-content-end gap-1">
-                              <ActionButton
-                                icon="arrow-clockwise"
-                                title="Reconnect Session"
-                                variant="info"
-                                disabled={!u.isOnline}
-                                onClick={() => handleReconnectUser(u)}
-                                loading={actionLoading[`reconnect-${u.username}`]}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Pagination Bottom */}
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              totalItems={pppoeFilteredUsers.length}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(val) => { setItemsPerPage(val); setCurrentPage(1); }}
-            />
           </div>
 
         </div>
