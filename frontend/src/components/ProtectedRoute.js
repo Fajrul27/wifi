@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
-import api from "../api/client";
+import api from "../services/api";
 
 export default function ProtectedRoute({ children, role }) {
   const [user, setUser] = useState(undefined); // ✔ penting: undefined bukan null

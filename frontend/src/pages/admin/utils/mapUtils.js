@@ -61,6 +61,20 @@ export const isValidCoord = (lat, lng) => {
 };
 
 export const sanitizeCoordinates = (coords) => {
+  if (typeof coords === "string") {
+    try {
+      coords = JSON.parse(coords);
+    } catch {
+      return null;
+    }
+  }
+
+  if (coords?.type === "LineString" && Array.isArray(coords.coordinates)) {
+    coords = coords.coordinates;
+  } else if (Array.isArray(coords?.coordinates)) {
+    coords = coords.coordinates;
+  }
+
   if (!Array.isArray(coords)) return null;
   const valid = [];
   for (let i = 0; i < coords.length; i++) {
@@ -70,6 +84,12 @@ export const sanitizeCoordinates = (coords) => {
       const lng = Number(pt[1]);
       if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0 && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
         valid.push([lat, lng]);
+      } else {
+        const swappedLat = Number(pt[1]);
+        const swappedLng = Number(pt[0]);
+        if (!isNaN(swappedLat) && !isNaN(swappedLng) && swappedLat !== 0 && swappedLng !== 0 && swappedLat >= -90 && swappedLat <= 90 && swappedLng >= -180 && swappedLng <= 180) {
+          valid.push([swappedLat, swappedLng]);
+        }
       }
     } else if (pt && typeof pt === 'object') {
       const lat = Number(pt.lat ?? pt.latitude);
@@ -82,3 +102,16 @@ export const sanitizeCoordinates = (coords) => {
   return valid.length >= 2 ? valid : null;
 };
 
+export const buildCableCoordinates = (routeCoords, startLat, startLng, endLat, endLng) => {
+  const routed = sanitizeCoordinates(routeCoords);
+  if (routed) return routed;
+
+  if (!isValidCoord(startLat, startLng) || !isValidCoord(endLat, endLng)) {
+    return null;
+  }
+
+  return [
+    [Number(startLat), Number(startLng)],
+    [Number(endLat), Number(endLng)],
+  ];
+};

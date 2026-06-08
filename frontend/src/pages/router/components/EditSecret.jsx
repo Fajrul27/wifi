@@ -1,6 +1,7 @@
 // components/EditSecret.jsx
 
 import { useEffect, useState } from "react";
+import api from "../../../services/api";
 
 export default function EditSecret({
   show,
@@ -45,23 +46,17 @@ export default function EditSecret({
         setLoadingData(true);
         setLoadingProfiles(true);
 
-        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
-        
         // Fetch Profiles
-        const profRes = await fetch(
-          `${apiUrl}/pppoe/${routerId}/profiles`
-        );
-        const profJson = await profRes.json();
+        const profRes = await api.get(`/pppoe/${routerId}/profiles`);
+        const profJson = profRes.data;
         const profData = profJson.data || [];
         setProfiles(profData);
 
         // Fetch Secret Detail
-        const secretRes = await fetch(
-          `${apiUrl}/pppoe/${routerId}/user/${username}`
-        );
-        const secretJson = await secretRes.json();
+        const secretRes = await api.get(`/pppoe/${routerId}/user/${username}`);
+        const secretJson = secretRes.data;
         
-        if (!secretRes.ok || !secretJson.success) {
+        if (!secretJson.success) {
           throw new Error(secretJson.message || "Gagal load detail PPPoE secret");
         }
 
@@ -125,21 +120,10 @@ export default function EditSecret({
         "remote-ipv6-prefix-pool": remoteIpv6PrefixPool.trim(),
       };
 
-      const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
-      const res = await fetch(
-        `${apiUrl}/pppoe/${routerId}/user/${username}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
+      const res = await api.put(`/pppoe/${routerId}/user/${username}`, payload);
+      const json = res.data;
 
-      const json = await res.json();
-
-      if (!res.ok || !json.success) {
+      if (!json.success) {
         throw new Error(json.message || "Gagal update PPP secret");
       }
 

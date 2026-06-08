@@ -26,6 +26,7 @@ const oltRoutes  = require('./src/routes/topology/olt/olt.routes');
 const topology  = require('./src/routes/topology/odc-odp/topology.routs');
 const oltPortRoutes = require('./src/routes/topology/oltPort.routes');
 const splitterRoutes = require('./src/routes/topology/splitter.routes');
+const authMiddleware = require("./src/Middleware/auth.middleware");
 
 
 /* =========================
@@ -50,6 +51,8 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
       "http://localhost:5000",
       "http://127.0.0.1:5000",
       "http://localhost:5001",
@@ -74,13 +77,13 @@ app.get("/health", (req, res) => {
 ========================= */
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", crudTeknisiRoutes);
-app.use("/api/routers", crudRouter);
-app.use("/api/pppoe", pppoeUser);
-app.use("/api/monitoring", monitoring);
-app.use("/api/olts", oltRoutes);
-app.use('/api/topology', topology);
-app.use("/api/olt-ports", oltPortRoutes);
-app.use("/api/splitter", splitterRoutes);
+app.use("/api/routers", authMiddleware, crudRouter);
+app.use("/api/pppoe", authMiddleware, pppoeUser);
+app.use("/api/monitoring", authMiddleware, monitoring);
+app.use("/api/olts", authMiddleware, oltRoutes);
+app.use('/api/topology', authMiddleware, topology);
+app.use("/api/olt-ports", authMiddleware, oltPortRoutes);
+app.use("/api/splitter", authMiddleware, splitterRoutes);
 
 const logRoutes = require("./src/routes/admin/log.route");
 app.use("/api/logs", logRoutes);

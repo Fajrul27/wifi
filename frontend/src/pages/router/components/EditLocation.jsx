@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import MapPicker from "../../../components/MapPicker";
+import api from "../../../services/api";
 
 export default function EditLocation({
   show,
@@ -37,22 +38,13 @@ export default function EditLocation({
       setSaving(true);
       setError("");
 
-      const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
-      const res = await fetch(
-        `${apiUrl}/pppoe/${routerId}/user/${user.id}/location`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            latitude: lat === "" ? null : parseFloat(lat),
-            longitude: lng === "" ? null : parseFloat(lng),
-          }),
-        }
-      );
+      const res = await api.put(`/pppoe/${routerId}/user/${user.id}/location`, {
+        latitude: lat === "" ? null : parseFloat(lat),
+        longitude: lng === "" ? null : parseFloat(lng),
+      });
+      const json = res.data;
 
-      const json = await res.json();
-
-      if (!res.ok || !json.success) {
+      if (!json.success) {
         throw new Error(json.message || "Gagal update lokasi");
       }
 

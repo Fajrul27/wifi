@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import routes from "./config/routes";
 import { GlobalRealtimeProvider } from "./context/GlobalRealtimeContext";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
   return (
@@ -12,15 +13,20 @@ export default function App() {
 
             if (r.layout) {
               const Layout = r.layout;
+              const content = (
+                <Layout>
+                  <Page />
+                </Layout>
+              );
 
               return (
                 <Route
                   key={i}
                   path={r.path}
                   element={
-                    <Layout>
-                      <Page />
-                    </Layout>
+                    r.role ? (
+                      <ProtectedRoute role={r.role}>{content}</ProtectedRoute>
+                    ) : content
                   }
                 />
               );
@@ -30,7 +36,15 @@ export default function App() {
               <Route
                 key={i}
                 path={r.path}
-                element={<Page />}
+                element={
+                  r.role ? (
+                    <ProtectedRoute role={r.role}>
+                      <Page />
+                    </ProtectedRoute>
+                  ) : (
+                    <Page />
+                  )
+                }
               />
             );
           })}

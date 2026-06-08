@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import "./AdminDashboard.css";
 import L from "leaflet";
 import api from "../../services/api";
-import { createCustomIcon, MARKER_CONFIG, isValidCoord } from "./utils/mapUtils";
+import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates } from "./utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "./components/DashboardMapComponents";
 import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
@@ -533,7 +533,7 @@ export default function AdminDashboard({
       if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
         lines.push({
           id: `router-olt-${port.id}`,
-          coordinates: port.roadCoordinates || [[Number(router.latitude), Number(router.longitude)], [Number(port.latitude), Number(port.longitude)]],
+          coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
           type: 'router-to-olt',
           color: '#0ea5e9',
           weight: 4,
@@ -577,7 +577,7 @@ export default function AdminDashboard({
 
         lines.push({
           id: `olt-${node.id}`,
-          coordinates: node.roadCoordinates || [[Number(port.latitude), Number(port.longitude)], [Number(node.latitude), Number(node.longitude)]],
+          coordinates: buildCableCoordinates(node.roadCoordinates, port.latitude, port.longitude, node.latitude, node.longitude),
           type: 'olt-to-odc',
           color: lineColor,
           weight: lineWeight,
@@ -605,7 +605,7 @@ export default function AdminDashboard({
 
           lines.push({
             id: `node-${node.id}`,
-            coordinates: node.roadCoordinates || [[Number(parent.latitude), Number(parent.longitude)], [Number(node.latitude), Number(node.longitude)]],
+            coordinates: buildCableCoordinates(node.roadCoordinates, parent.latitude, parent.longitude, node.latitude, node.longitude),
             type: isODP ? 'odc-to-odp' : 'node-to-node',
             color: lineColor,
             weight: !anyUser ? 3 : (isOnline ? 4 : 5),
@@ -625,7 +625,7 @@ export default function AdminDashboard({
             const isUserOnline = user.isOnline;
             lines.push({
                 id: `client-${user.id}`,
-                coordinates: user.roadCoordinates || [[Number(node.latitude), Number(node.longitude)], [Number(user.latitude), Number(user.longitude)]],
+                coordinates: buildCableCoordinates(user.roadCoordinates, node.latitude, node.longitude, user.latitude, user.longitude),
                 type: 'odp-to-client',
                 color: isUserOnline ? '#10b981' : '#ef4444',
                 weight: isUserOnline ? 3 : 4,

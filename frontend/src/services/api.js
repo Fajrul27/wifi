@@ -1,11 +1,21 @@
 import axios from "axios";
 
+const getApiBaseURL = () => {
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+
+  if (process.env.NODE_ENV === "production" || window.location.hostname !== "localhost") {
+    return "/api";
+  }
+
+  return "http://localhost:5000/api";
+};
+
 const api = axios.create({
   // If we are on a real domain (not localhost), always use relative path /api
   // This prevents browsers from blocking requests due to mixed content or Local Network Access rules
-  baseURL: (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') 
-    ? "/api" 
-    : "http://localhost:3000/api",
+  baseURL: getApiBaseURL(),
    withCredentials: true,
   timeout: 15000, // 🔥 penting biar tidak hanging request
   headers: {

@@ -5,17 +5,20 @@ import Login from "../pages/auth/Login";
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import Technician from "../pages/admin/crud_users";
 import Profile from "../pages/admin/Profile";
-import RouterList from "../pages/router/RouterList"
-import PPPoE from "../pages/router/PppoePage"
-import maps from "../pages/ftth/maps"
-import ftth from "../pages/ftth/FtthTopologyManager"
-import bandwidth from "../pages/router/bandwidth"
+import RouterList from "../pages/router/RouterList";
+import PPPoE from "../pages/router/PppoePage";
+import maps from "../pages/ftth/maps";
+import ftth from "../pages/ftth/FtthTopologyManager";
+import bandwidth from "../pages/router/bandwidth";
 
 // teknisi
 import TechnicianDashboard from "../pages/maintenance/TechnicianDashboard";
-import mapss from "../pages/maintenance/maps"
+import mapss from "../pages/maintenance/maps";
 import AdminLayout from "../layouts/AdminLayout";
 import TeknisiLayout from "../layouts/TeknisiLayout";
+
+const adminRole = "ADMIN";
+const teknisiRole = "TEKNISI";
 
 const routes = [
   {
@@ -23,76 +26,72 @@ const routes = [
     element: Login,
   },
 
-  // ADMIN
   {
     path: "/admin",
     layout: AdminLayout,
     element: AdminDashboard,
+    role: adminRole,
   },
-
-  // 🔥 ROUTER DETAIL WAJIB INI
-  {
-    path: "/admin",
-    layout: AdminLayout,
-    element: AdminDashboard,
-  },
-
   {
     path: "/admin/technicians",
     layout: AdminLayout,
     element: Technician,
+    role: adminRole,
   },
-
   {
     path: "/admin/profile",
     layout: AdminLayout,
     element: Profile,
+    role: adminRole,
   },
   {
-  path: "/admin/routers",
-  layout: AdminLayout,
-  element: RouterList,
-},
+    path: "/admin/routers",
+    layout: AdminLayout,
+    element: RouterList,
+    role: adminRole,
+  },
   {
-  path: "/admin/ppp",
-  layout: AdminLayout,
-  element: PPPoE,
-},
-
+    path: "/admin/ppp",
+    layout: AdminLayout,
+    element: PPPoE,
+    role: adminRole,
+  },
   {
-  path: "/admin/maps",
-  layout: AdminLayout,
-  element: maps,
-},
+    path: "/admin/maps",
+    layout: AdminLayout,
+    element: maps,
+    role: adminRole,
+  },
   {
-  path: "/admin/ftth",
-  layout: AdminLayout,
-  element: ftth,
-},
+    path: "/admin/ftth",
+    layout: AdminLayout,
+    element: ftth,
+    role: adminRole,
+  },
+  {
+    path: "/admin/pppoe_profiles",
+    layout: AdminLayout,
+    element: bandwidth,
+    role: adminRole,
+  },
 
-
-{
-  path: "/admin/pppoe_profiles",
-  layout: AdminLayout,
-  element: bandwidth,
-},
-
-
-  // TEKNISI
   {
     path: "/teknisi",
     layout: TeknisiLayout,
     element: TechnicianDashboard,
+    role: teknisiRole,
   },
-   {
+  {
     path: "/teknisi/maps",
     layout: TeknisiLayout,
     element: mapss,
+    role: teknisiRole,
   },
   {
     path: "/teknisi/profile",
     layout: TeknisiLayout,
     element: Profile,
+    role: teknisiRole,
   },
 ];
 

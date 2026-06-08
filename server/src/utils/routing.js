@@ -15,9 +15,18 @@ async function getRoadRoute(startLat, startLng, endLat, endLng) {
 
   // Use p-limit to throttle OSRM API calls to max 5 concurrent requests
   return limit(async () => {
+    const fallback = [
+      [Number(startLat), Number(startLng)],
+      [Number(endLat), Number(endLng)],
+    ];
+
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
-      const res = await fetch(url);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), Number(process.env.ROUTING_TIMEOUT_MS || 3500));
+
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
       const data = await res.json();
 
       if (data.code === "Ok" && data.routes?.[0]?.geometry?.coordinates) {
@@ -40,11 +49,7 @@ async function getRoadRoute(startLat, startLng, endLat, endLng) {
       console.error("OSRM Routing Error:", err.message);
     }
 
-    // Fallback to straight line if API fails or is offline
-    const fallback = [
-      [startLat, startLng],
-      [endLat, endLng],
-    ];
+    routeCache.set(cacheKey, fallback);
     return fallback;
   });
 }

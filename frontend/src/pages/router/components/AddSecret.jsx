@@ -1,6 +1,7 @@
 // components/AddSecret.jsx
 
 import { useEffect, useState } from "react";
+import api from "../../../services/api";
 
 export default function AddSecret({
   show,
@@ -100,14 +101,8 @@ export default function AddSecret({
             true
           );
 
-        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
-          const res =
-            await fetch(
-              `${apiUrl}/pppoe/${routerId}/profiles`
-            );
-
-          const json =
-            await res.json();
+          const res = await api.get(`/pppoe/${routerId}/profiles`);
+          const json = res.data;
 
           const data =
             json.data ||
@@ -309,29 +304,10 @@ export default function AddSecret({
           payload
         );
 
-        const apiUrl = (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') ? '/api' : 'http://localhost:3000/api';
-        const res =
-          await fetch(
-            `${apiUrl}/pppoe/${routerId}/user`,
-            {
-              method: "POST",
-
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-
-              body: JSON.stringify(
-                payload
-              ),
-            }
-          );
-
-        const json =
-          await res.json();
+        const res = await api.post(`/pppoe/${routerId}/user`, payload);
+        const json = res.data;
 
         if (
-          !res.ok ||
           !json.success
         ) {
           throw new Error(
