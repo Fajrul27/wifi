@@ -15,6 +15,7 @@ router.put("/odc/:id", TopologyController.updateOdc);
 router.post("/odc/:parentId/child", TopologyController.createOdcChild);
 
 router.get("/odc/tree/:oltPortId", TopologyController.getOdcTree);
+router.get("/odc/:id", TopologyController.getOdcById);
 
 router.delete("/odc/:id", TopologyController.deleteOdc);
 

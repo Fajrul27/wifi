@@ -64,6 +64,20 @@ class TopologyController {
   }
 
   // =====================================================
+  // GET ODC DETAIL
+  // =====================================================
+
+  async getOdcById(req, res) {
+    try {
+      const { id } = req.params;
+      const result = await TopologyService.getOdcById(id);
+      return res.json({ success: true, message: "ODC detail fetched", data: result });
+    } catch (err) {
+      return res.status(404).json({ success: false, message: err.message });
+    }
+  }
+
+  // =====================================================
   // DELETE ODC
   // =====================================================
 

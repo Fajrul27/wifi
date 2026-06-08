@@ -10,6 +10,7 @@ import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "../admin/compone
 import DashboardKpiCards from "../admin/components/DashboardKpiCards";
 import DashboardBandwidthChart from "../admin/components/DashboardBandwidthChart";
 import DashboardSystemLogs from "../admin/components/DashboardSystemLogs";
+import NodePortDetailModal from "../admin/components/NodePortDetailModal";
 import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
 import {
   usePppoeUserMonitor,
@@ -244,6 +245,7 @@ export default function TechnicianDashboard({
   const [mapZoom, setMapZoom] = useState(8);
   const [visibleBounds, setVisibleBounds] = useState(null);
   const [activePopup, setActivePopup] = useState(null);
+  const [portDetailNode, setPortDetailNode] = useState(null);
 
   const [showClients, setShowClients] = useState(() => {
     try { const v = sessionStorage.getItem('dashboard_show_clients'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
@@ -339,7 +341,7 @@ export default function TechnicianDashboard({
         return port?.routerId === Number(selectedRouter);
       }
       if (node.parentNodeId) {
-        const parent = nodes.find(n => n.type === "ODC" && n.id === node.parentNodeId);
+        const parent = nodes.find(n => n.type === "ODC" && Number(n.id) === Number(node.parentNodeId));
         return parent ? isNodeOnRouter(parent) : false;
       }
       return false;
@@ -535,7 +537,8 @@ export default function TechnicianDashboard({
   }, [userStatusMap]);
 
   const nodesMap = useMemo(() => {
-    return new Map(filteredNodes.map(n => [n.id, n]));
+    // Use Number(n.id) as key to avoid string/number type mismatch in production builds
+    return new Map(filteredNodes.map(n => [Number(n.id), n]));
   }, [filteredNodes]);
 
   const connections = useMemo(() => {
@@ -543,7 +546,7 @@ export default function TechnicianDashboard({
     const lines = [];
 
     filteredOltPorts.forEach(port => {
-      const router = routers.find(r => r.id === port.routerId);
+      const router = routers.find(r => Number(r.id) === Number(port.routerId));
       if (router && isValidCoord(router.latitude, router.longitude) && isValidCoord(port.latitude, port.longitude)) {
         lines.push({
           id: `router-olt-${port.id}`,
@@ -606,7 +609,8 @@ export default function TechnicianDashboard({
     filteredNodes.forEach(node => {
       const parentId = node.incomingLinks?.[0]?.fromNodeId || node.parentNodeId;
       if (parentId) {
-        const parent = nodesMap.get(parentId);
+        // Use Number() to match Number-keyed nodesMap, preventing string/number mismatch
+        const parent = nodesMap.get(Number(parentId));
         if (isValidCoord(parent?.latitude, parent?.longitude) && isValidCoord(node.latitude, node.longitude)) {
           const anyUser = hasAnyUser(node.id);
           const isOnline = anyUser ? hasOnlineUser(node.id) : true;
@@ -633,7 +637,7 @@ export default function TechnicianDashboard({
     if (shouldShowClients) {
         filteredUsers.forEach(user => {
         if (user.topologyNodeId) {
-            const node = nodesMap.get(user.topologyNodeId);
+            const node = nodesMap.get(Number(user.topologyNodeId));
             if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
             const isUserOnline = user.isOnline;
             lines.push({
@@ -713,6 +717,89 @@ export default function TechnicianDashboard({
     if (type === 'oltPort' && onOltPortClick) onOltPortClick(entity.id);
     else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
    }, [onNodeClick, onOltPortClick, mapInstance, groupedNodes, groupedUsers]);
+
+  const handleNavigateToEntity = useCallback((entityId, type) => {
+    // 1. Find the target entity
+    let entity = null;
+    if (type === 'client') {
+      entity = pppoeUsers.find(u => Number(u.id) === Number(entityId) || u.username === entityId);
+    } else if (type === 'node') {
+      // ODP IDs in the frontend nodes array = database_id + 100000
+      entity = nodes.find(n => {
+        if (n.type === 'ODC') return Number(n.id) === Number(entityId);
+        if (n.type === 'ODP') return (
+          Number(n.id) === Number(entityId) + 100000 ||
+          Number(n.id) === Number(entityId)
+        );
+        return false;
+      });
+    } else if (type === 'oltPort') {
+      entity = oltPorts.find(p => Number(p.id) === Number(entityId));
+    }
+
+    if (!entity) {
+      console.warn('[handleNavigateToEntity] Entity not found:', { entityId, type });
+      setPortDetailNode(null);
+      return;
+    }
+
+    // 2. Find which group this entity belongs to (if any)
+    let groupIndex = -1;
+    let targetGroup = null;
+    if (type === 'node') {
+      for (let i = 0; i < groupedNodes.length; i++) {
+        if (groupedNodes[i].some(n => n.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedNodes[i];
+          break;
+        }
+      }
+    } else if (type === 'client') {
+      for (let i = 0; i < groupedUsers.length; i++) {
+        if (groupedUsers[i].some(u => u.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedUsers[i];
+          break;
+        }
+      }
+    }
+
+    // 3. Close modal first
+    setPortDetailNode(null);
+
+    // 4. Reset popup state to guarantee React detects a state change
+    setActivePopup(null);
+    setActiveGroupDetailNode(null);
+
+    // 5. After modal unmounts, open the correct popup and pan map
+    setTimeout(() => {
+      if (type === 'node' && targetGroup && targetGroup.length > 1) {
+        setActiveGroupDetailNode(entity);
+        setActivePopup({ id: groupIndex, type: 'group' });
+      } else if (type === 'client' && targetGroup && targetGroup.length > 1) {
+        setActiveGroupDetailClient(entity);
+        setActivePopup({ id: groupIndex, type: 'clientGroup' });
+      } else {
+        setActivePopup({ id: entity.id, type });
+      }
+
+      // Pan/fly map to entity location
+      if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
+        const offsetLat = Number(entity.latitude) + 0.0006;
+        const targetLatLng = L.latLng(offsetLat, Number(entity.longitude));
+        const actualLatLng = L.latLng(Number(entity.latitude), Number(entity.longitude));
+        mapInstance.stop();
+        const dist = mapInstance.getCenter().distanceTo(actualLatLng);
+        const currentZoom = mapInstance.getZoom();
+        if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
+          mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+        } else {
+          mapInstance.flyTo(targetLatLng, 18, { animate: true, duration: 1.2 });
+        }
+      }
+    }, 120);
+  }, [nodes, pppoeUsers, oltPorts, groupedNodes, groupedUsers, mapInstance,
+      setActivePopup, setActiveGroupDetailNode, setActiveGroupDetailClient]);
 
   const handleGroupMarkerClick = useCallback((centerEntity, index) => {
     setActiveGroupDetailNode(null);
@@ -859,6 +946,13 @@ export default function TechnicianDashboard({
                                           )}
                                       </div>
                                   )}
+                                  <button
+                                      className="btn btn-sm btn-primary w-100 mt-2 fw-semibold"
+                                      style={{ fontSize: '10px', borderRadius: '6px' }}
+                                      onClick={() => setPortDetailNode(entity)}
+                                  >
+                                      <i className="bi bi-grid-3x3-gap-fill me-1"></i> Detail Port
+                                  </button>
                               </div>
                           </>
                       ) : (
@@ -874,7 +968,7 @@ export default function TechnicianDashboard({
           )}
       </Popup>
     );
-  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setActiveGroupDetailNode, setLightbox]);
+  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setActiveGroupDetailNode, setLightbox, setPortDetailNode]);
 
   const renderGroupedClientPopup = useCallback((group, index) => {
     const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
@@ -1071,6 +1165,13 @@ export default function TechnicianDashboard({
                 );
               })}
             </div>
+            <button
+                className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                onClick={e => { e.stopPropagation(); setPortDetailNode({ ...entity, type: 'oltPort' }); }}
+                style={{ fontSize: '11px', borderRadius: '6px' }}
+            >
+                <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+            </button>
           </div>
         </Popup>
       );
@@ -1099,12 +1200,26 @@ export default function TechnicianDashboard({
                                 <div className="mb-1"><span className="text-muted">Last Seen:</span> <strong>{entity.lastSeen ? new Date(entity.lastSeen).toLocaleString('id-ID') : '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Total OLT Port:</span> <strong>{oltPorts.filter(p => p.routerId === entity.id).length}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Total Clients:</span> <strong>{pppoeUsers.filter(u => u.routerId === entity.id).length} ({pppoeUsers.filter(u => u.routerId === entity.id && u.isOnline).length} Online)</strong></div>
+                                <button
+                                    className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                                    onClick={() => setPortDetailNode({ ...entity, type: 'Router' })}
+                                    style={{ fontSize: '11px', borderRadius: '6px' }}
+                                >
+                                    <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+                                </button>
                             </>
                         )}
                         {type === 'node' && (
                             <>
                                 <div className="mb-1"><span className="text-muted">Tipe:</span> <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
                                 {entity.description && <div className="mb-1 text-muted text-truncate" style={{ maxWidth: '230px' }} title={entity.description}>{entity.description}</div>}
+                                <button
+                                    className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                                    onClick={() => setPortDetailNode(entity)}
+                                    style={{ fontSize: '11px', borderRadius: '6px' }}
+                                >
+                                    <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+                                </button>
                             </>
                         )}
                         {type === 'client' && (
@@ -1164,7 +1279,7 @@ export default function TechnicianDashboard({
             )}
         </Popup>
     );
-  }, [isDarkMode, setActivePopup, setLightbox, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick]);
+  }, [isDarkMode, setActivePopup, setLightbox, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick, setPortDetailNode]);
 
 
 
@@ -2163,6 +2278,21 @@ export default function TechnicianDashboard({
         </div>,
         document.body
       )}
+      {/* PORT DETAILS MODAL */}
+      {portDetailNode && createPortal(
+        <NodePortDetailModal
+          show={!!portDetailNode}
+          onClose={() => setPortDetailNode(null)}
+          node={portDetailNode}
+          isDarkMode={isDarkMode}
+          nodes={nodes}
+          oltPorts={oltPorts}
+          pppoeUsers={pppoeUsers}
+          onNavigateToEntity={handleNavigateToEntity}
+        />,
+        document.body
+      )}
+
     </>
   );
 }

@@ -811,3 +811,13 @@ html:active-view-transition {
   opacity: 1;
   animation: radar-pulse 1.8s infinite ease-out;
 }
+
+/* Custom Modal Backdrop for Port Details */
+.modal-backdrop-custom {
+  animation: fadeInBackdrop 0.2s ease-out forwards;
+}
+
+@keyframes fadeInBackdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

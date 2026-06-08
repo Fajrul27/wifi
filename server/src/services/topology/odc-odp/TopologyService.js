@@ -835,6 +835,57 @@ async createOdc(data) {
   }
 
   // =====================================================
+  // GET ODC DETAIL
+  // =====================================================
+
+  async getOdcById(id) {
+    const odcId = toInt(id, "id");
+
+    const odc = await prisma.odc.findUnique({
+      where: {
+        id: odcId,
+      },
+      include: {
+        ports: {
+          orderBy: { index: "asc" }
+        },
+      },
+    });
+
+    if (!odc) {
+      throw new Error("ODC tidak ditemukan");
+    }
+
+    const portsWithConnections = await Promise.all(
+      odc.ports.map(async (port) => {
+        let connectionName = null;
+        if (port.connectionType === "ODC" && port.connectedOdcId) {
+          const childOdc = await prisma.odc.findUnique({
+            where: { id: port.connectedOdcId },
+            select: { name: true }
+          });
+          connectionName = childOdc?.name;
+        } else if (port.connectionType === "ODP" && port.connectedOdpId) {
+          const connectedOdp = await prisma.odp.findUnique({
+            where: { id: port.connectedOdpId },
+            select: { name: true }
+          });
+          connectionName = connectedOdp?.name;
+        }
+        return {
+          ...port,
+          connectionName
+        };
+      })
+    );
+
+    return {
+      ...odc,
+      ports: portsWithConnections
+    };
+  }
+
+  // =====================================================
   // GET ODP DETAIL
   // =====================================================
 

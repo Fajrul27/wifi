@@ -12,6 +12,7 @@ import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "./components/Das
 import DashboardKpiCards from "./components/DashboardKpiCards";
 import DashboardBandwidthChart from "./components/DashboardBandwidthChart";
 import DashboardSystemLogs from "./components/DashboardSystemLogs";
+import NodePortDetailModal from "./components/NodePortDetailModal";
 import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
 
 const canvasRenderer = L.canvas({ padding: 1.0 });
@@ -190,6 +191,7 @@ export default function AdminDashboard({
   const [mapZoom, setMapZoom] = useState(8);
   const [visibleBounds, setVisibleBounds] = useState(null);
   const [activePopup, setActivePopup] = useState(null); // { id: string|number, type: string }
+  const [portDetailNode, setPortDetailNode] = useState(null);
 
   const [showClients, setShowClients] = useState(() => {
     try { const v = sessionStorage.getItem('dashboard_show_clients'); return v !== null ? v === 'true' : true; } catch(e) { return true; }
@@ -313,11 +315,11 @@ export default function AdminDashboard({
     if (!selectedRouter) return nodes;
     const isNodeOnRouter = (node) => {
       if (node.oltPortId) {
-        const port = oltPorts.find(p => p.id === node.oltPortId);
+        const port = oltPorts.find(p => Number(p.id) === Number(node.oltPortId));
         return port?.routerId === Number(selectedRouter);
       }
       if (node.parentNodeId) {
-        const parent = nodes.find(n => n.type === "ODC" && n.id === node.parentNodeId);
+        const parent = nodes.find(n => n.type === "ODC" && Number(n.id) === Number(node.parentNodeId));
         return parent ? isNodeOnRouter(parent) : false;
       }
       return false;
@@ -523,10 +525,11 @@ export default function AdminDashboard({
     const lines = [];
     
     // Create a node Map for O(1) lookups inside the loops
-    const nodesMap = new Map(nodes.map(n => [n.id, n]));
+    // Use Number(n.id) as key to avoid string/number type mismatch in production builds
+    const nodesMap = new Map(nodes.map(n => [Number(n.id), n]));
 
     filteredOltPorts.forEach(port => {
-      const router = routers.find(r => r.id === port.routerId);
+      const router = routers.find(r => Number(r.id) === Number(port.routerId));
       if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
         lines.push({
           id: `router-olt-${port.id}`,
@@ -589,7 +592,8 @@ export default function AdminDashboard({
     filteredNodes.forEach(node => {
       const parentId = node.incomingLinks?.[0]?.fromNodeId || node.parentNodeId;
       if (parentId) {
-        const parent = nodesMap.get(parentId);
+        // Use Number() to match the Number-keyed nodesMap, avoiding string vs number mismatch
+        const parent = nodesMap.get(Number(parentId));
         if (isValidCoord(parent?.latitude, parent?.longitude) && isValidCoord(node.latitude, node.longitude)) {
           const anyUser = hasAnyUser(node.id);
           const isOnline = anyUser ? hasOnlineUser(node.id) : true;
@@ -616,7 +620,7 @@ export default function AdminDashboard({
     if (shouldShowClients) {
         filteredUsers.forEach(user => {
         if (user.topologyNodeId) {
-            const node = nodesMap.get(user.topologyNodeId);
+            const node = nodesMap.get(Number(user.topologyNodeId));
             if (isValidCoord(user.latitude, user.longitude) && isValidCoord(node?.latitude, node?.longitude) && node?.type === 'ODP') {
             const isUserOnline = user.isOnline;
             lines.push({
@@ -698,6 +702,102 @@ export default function AdminDashboard({
     if (type === 'oltPort' && onOltPortClick) onOltPortClick(entity.id);
     else if (type === 'node' && onNodeClick) onNodeClick(entity.id);
    }, [onNodeClick, onOltPortClick, mapInstance, groupedNodes, groupedUsers]);
+
+  const handleNavigateToEntity = useCallback((entityId, type) => {
+    console.log('[handleNavigateToEntity] Navigation initiated:', { entityId, type });
+    // 1. Find the target entity
+    let entity = null;
+    if (type === 'client') {
+      entity = pppoeUsers.find(u => Number(u.id) === Number(entityId) || u.username === entityId);
+    } else if (type === 'node') {
+      console.log('[handleNavigateToEntity] Searching nodes, total nodes:', nodes.length);
+      // ODP IDs in the frontend nodes array = database_id + 100000
+      entity = nodes.find(n => {
+        if (n.type === 'ODC') return Number(n.id) === Number(entityId);
+        if (n.type === 'ODP') {
+          const match = Number(n.id) === Number(entityId) + 100000 || Number(n.id) === Number(entityId);
+          if (match) {
+            console.log('[handleNavigateToEntity] Found matching ODP node:', n);
+          }
+          return match;
+        }
+        return false;
+      });
+    } else if (type === 'oltPort') {
+      entity = oltPorts.find(p => Number(p.id) === Number(entityId));
+    }
+
+    console.log('[handleNavigateToEntity] Lookup result:', { entityId, found: !!entity, entityName: entity?.name });
+
+    if (!entity) {
+      console.warn('[handleNavigateToEntity] Entity not found:', { entityId, type });
+      setPortDetailNode(null);
+      return;
+    }
+
+    // 2. Find which group this entity belongs to (if any)
+    let groupIndex = -1;
+    let targetGroup = null;
+    if (type === 'node') {
+      console.log('[handleNavigateToEntity] Searching groupedNodes, total groups:', groupedNodes.length);
+      for (let i = 0; i < groupedNodes.length; i++) {
+        if (groupedNodes[i].some(n => n.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedNodes[i];
+          console.log(`[handleNavigateToEntity] Entity belongs to group index ${i}, group size: ${groupedNodes[i].length}`);
+          break;
+        }
+      }
+    } else if (type === 'client') {
+      for (let i = 0; i < groupedUsers.length; i++) {
+        if (groupedUsers[i].some(u => u.id === entity.id)) {
+          groupIndex = i;
+          targetGroup = groupedUsers[i];
+          break;
+        }
+      }
+    }
+
+    // 3. Close modal first
+    setPortDetailNode(null);
+
+    // 4. Reset popup state to guarantee React detects a state change
+    setActivePopup(null);
+    setActiveGroupDetailNode(null);
+
+    // 5. After modal unmounts, open the correct popup and pan map
+    setTimeout(() => {
+      // Determine the correct popup to open
+      if (type === 'node' && targetGroup && targetGroup.length > 1) {
+        // Stacked group: open the group popup and highlight this entity
+        setActiveGroupDetailNode(entity);
+        setActivePopup({ id: groupIndex, type: 'group' });
+      } else if (type === 'client' && targetGroup && targetGroup.length > 1) {
+        setActiveGroupDetailClient(entity);
+        setActivePopup({ id: groupIndex, type: 'clientGroup' });
+      } else {
+        // Standalone entity: open individual popup
+        setActivePopup({ id: entity.id, type });
+      }
+
+      // Pan/fly map to entity location
+      if (mapInstance && entity.latitude && entity.longitude && isValidCoord(entity.latitude, entity.longitude)) {
+        const offsetLat = Number(entity.latitude) + 0.0006;
+        const targetLatLng = L.latLng(offsetLat, Number(entity.longitude));
+        const actualLatLng = L.latLng(Number(entity.latitude), Number(entity.longitude));
+        mapInstance.stop();
+        const dist = mapInstance.getCenter().distanceTo(actualLatLng);
+        const currentZoom = mapInstance.getZoom();
+        if (dist < 500 && Math.abs(currentZoom - 18) <= 1) {
+          mapInstance.setView(targetLatLng, 18, { animate: true, duration: 0.5 });
+        } else {
+          mapInstance.flyTo(targetLatLng, 18, { animate: true, duration: 1.2 });
+        }
+      }
+    }, 120);
+  }, [nodes, pppoeUsers, oltPorts, groupedNodes, groupedUsers, mapInstance,
+      setActivePopup, setActiveGroupDetailNode, setActiveGroupDetailClient]);
+
 
   const handleGroupMarkerClick = useCallback((centerEntity, index) => {
     setActiveGroupDetailNode(null);
@@ -885,6 +985,13 @@ export default function AdminDashboard({
                                           </a>
                                       )}
                                   </div>
+                                  <button
+                                      className="btn btn-sm btn-primary w-100 mt-2 fw-semibold"
+                                      style={{ fontSize: '10px', borderRadius: '6px' }}
+                                      onClick={() => setPortDetailNode(entity)}
+                                  >
+                                      <i className="bi bi-grid-3x3-gap-fill me-1"></i> Detail Port
+                                  </button>
                               </div>
                           </>
                       ) : (
@@ -900,7 +1007,7 @@ export default function AdminDashboard({
           )}
       </Popup>
     );
-  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, handleGroupNodeDetailClick]);
+  }, [activePopup, activeGroupDetailNode, isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, handleGroupNodeDetailClick, setPortDetailNode]);
 
   const renderGroupedClientPopup = useCallback((group, index) => {
     const isOpen = activePopup?.id === index && activePopup?.type === 'clientGroup';
@@ -1111,6 +1218,13 @@ export default function AdminDashboard({
                 );
               })}
             </div>
+            <button
+                className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                onClick={e => { e.stopPropagation(); setPortDetailNode({ ...entity, type: 'oltPort' }); }}
+                style={{ fontSize: '11px', borderRadius: '6px' }}
+            >
+                <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+            </button>
           </div>
         </Popup>
       );
@@ -1139,12 +1253,26 @@ export default function AdminDashboard({
                                 <div className="mb-1"><span className="text-muted">Last Seen:</span> <strong>{entity.lastSeen ? new Date(entity.lastSeen).toLocaleString('id-ID') : '—'}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Total OLT Port:</span> <strong>{oltPorts.filter(p => p.routerId === entity.id).length}</strong></div>
                                 <div className="mb-1"><span className="text-muted">Total Clients:</span> <strong>{pppoeUsers.filter(u => u.routerId === entity.id).length} ({pppoeUsers.filter(u => u.routerId === entity.id && u.isOnline).length} Online)</strong></div>
+                                <button
+                                    className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                                    onClick={() => setPortDetailNode({ ...entity, type: 'Router' })}
+                                    style={{ fontSize: '11px', borderRadius: '6px' }}
+                                >
+                                    <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+                                </button>
                             </>
                         )}
                         {type === 'node' && (
                             <>
                                 <div className="mb-1"><span className="text-muted">Tipe:</span> <span className={`badge ${entity.type === 'ODP' ? 'bg-warning text-dark' : 'bg-success'}`}>{entity.type}</span></div>
                                 {entity.description && <div className="mb-1 text-muted text-truncate" style={{ maxWidth: '230px' }} title={entity.description}>{entity.description}</div>}
+                                <button
+                                    className="btn btn-sm btn-outline-primary w-100 mt-2 fw-semibold"
+                                    onClick={() => setPortDetailNode(entity)}
+                                    style={{ fontSize: '11px', borderRadius: '6px' }}
+                                >
+                                    <i className="bi bi-grid-3x3-gap-fill me-1"></i> Lihat Detail Port
+                                </button>
                             </>
                         )}
                         {type === 'client' && (
@@ -1168,43 +1296,40 @@ export default function AdminDashboard({
                                         {entity.whatsapp && <div className="mb-2"><i className="bi bi-whatsapp me-1 text-success"></i> <a href={`https://wa.me/${entity.whatsapp}`} target="_blank" rel="noreferrer" className="text-decoration-none text-success fw-bold">{entity.whatsapp}</a></div>}
                                         {entity.address && <div className="mb-2" style={{ fontSize: '11px' }}><i className="bi bi-geo-alt me-1 text-danger"></i> <span className="text-muted">{entity.address}</span></div>}
                                         {(entity.photoUrl || entity.photoUrl2 || entity.photoUrl3) && (
-                                            <div className="mt-2">
-                                                <span className="d-block mb-1 text-muted" style={{ fontSize: '10px' }}><i className="bi bi-image me-1"></i> Preview Foto Lokasi (Klik untuk perbesar):</span>
-                                                <div className="d-flex gap-2 overflow-auto pb-1" style={{ maxWidth: '100%' }}>
-                                                    {(() => {
-                                                        const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
-                                                        return photos.map((url, index) => (
-                                                            <div 
-                                                                key={index} 
-                                                                className="flex-shrink-0"
-                                                                style={{ cursor: 'pointer' }}
-                                                                onClick={() => setLightbox({ isOpen: true, index, images: photos })}
-                                                                title="Klik untuk memperbesar"
-                                                            >
-                                                                <img src={url} alt={`Foto ${index + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '90px', width: 'auto', objectFit: 'cover', transition: 'transform 0.2s' }} />
-                                                            </div>
-                                                        ));
-                                                    })()}
-                                                </div>
+                                            <div className="d-flex gap-1 overflow-x-auto pb-1 custom-scrollbar">
+                                                {(() => {
+                                                    const photos = [entity.photoUrl, entity.photoUrl2, entity.photoUrl3].filter(Boolean);
+                                                    return photos.map((url, idx) => (
+                                                        <div 
+                                                            key={idx} 
+                                                            className="flex-shrink-0"
+                                                            style={{ cursor: 'pointer' }}
+                                                            onClick={() => setLightbox({ isOpen: true, index: idx, images: photos })}
+                                                            title="Klik untuk memperbesar"
+                                                        >
+                                                            <img src={url} alt={`Foto ${idx + 1}`} className="img-fluid rounded border hover-shadow" style={{ height: '45px', width: 'auto', objectFit: 'cover' }} />
+                                                        </div>
+                                                    ));
+                                                })()}
                                             </div>
                                         )}
+                                        <button className="btn btn-sm btn-outline-primary w-100 mt-2" style={{ fontSize: '10px' }} onClick={() => {
+                                            setEditEntity(entity);
+                                            setEditForm({
+                                                whatsapp: entity.whatsapp || "",
+                                                address: entity.address || "",
+                                                photoUrl: entity.photoUrl || "",
+                                                photoUrl2: entity.photoUrl2 || "",
+                                                photoUrl3: entity.photoUrl3 || "",
+                                                file: null,
+                                                file2: null,
+                                                file3: null
+                                            });
+                                        }}>
+                                            <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
+                                        </button>
                                     </div>
                                 )}
-                                <button className="btn btn-sm w-100 mt-2 btn-outline-primary" style={{ fontSize: '12px' }} onClick={() => {
-                                    setEditEntity(entity);
-                                    setEditForm({
-                                        whatsapp: entity.whatsapp || "",
-                                        address: entity.address || "",
-                                        photoUrl: entity.photoUrl || "",
-                                        photoUrl2: entity.photoUrl2 || "",
-                                        photoUrl3: entity.photoUrl3 || "",
-                                        file: null,
-                                        file2: null,
-                                        file3: null
-                                    });
-                                }}>
-                                    <i className="bi bi-pencil-square me-1"></i> Edit Info Lapangan
-                                </button>
                             </>
                         )}
                         {entity.latitude && (
@@ -1219,9 +1344,7 @@ export default function AdminDashboard({
             )}
         </Popup>
     );
-  }, [isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick]);
-
-
+  }, [isDarkMode, setActivePopup, setLightbox, setEditEntity, setEditForm, activePopup, nodes, oltPorts, pppoeUsers, handleMarkerClick, setPortDetailNode]);
 
   const mapMarkers = useMemo(() => {
     if (!isDeferredReady) return null;
@@ -2331,6 +2454,21 @@ export default function AdminDashboard({
             </div>
           </div>
         </div>,
+        document.body
+      )}
+
+      {/* PORT DETAILS MODAL */}
+      {portDetailNode && createPortal(
+        <NodePortDetailModal
+          show={!!portDetailNode}
+          onClose={() => setPortDetailNode(null)}
+          node={portDetailNode}
+          isDarkMode={isDarkMode}
+          nodes={nodes}
+          oltPorts={oltPorts}
+          pppoeUsers={pppoeUsers}
+          onNavigateToEntity={handleNavigateToEntity}
+        />,
         document.body
       )}
 
