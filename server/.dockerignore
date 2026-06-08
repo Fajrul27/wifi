@@ -1,0 +1,16 @@
+node_modules
+.git
+.gitignore
+Dockerfile
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+*.log
+*_log.txt
+db_test.txt
+scratch*.js
+test_*.js
+admin_cookie.txt
+cookies.txt
+teknisi_cookie.txt

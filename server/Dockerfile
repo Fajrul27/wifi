@@ -7,7 +7,7 @@ RUN apt-get update -y && apt-get install -y openssl
 
 # Copy package.json and install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci --omit=dev
 
 # Copy Prisma schema and generate client
 COPY prisma ./prisma
