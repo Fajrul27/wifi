@@ -756,7 +756,7 @@ export default function TechnicianDashboard({
                               return (
                                   <div key={i} className={`py-1 px-2 mb-1 rounded d-flex justify-content-between align-items-center ${isSelected ? 'bg-primary-subtle text-primary-emphasis fw-semibold' : ''}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.03)' }}>
                                       <div className="text-truncate" style={{ maxWidth: '120px' }}>
-                                          <span className="d-block text-truncate" style={{ fontSize: '11px' }}>{item.name}</span>
+                                          <span className="d-block popup-list-name" style={{ fontSize: '11px' }}>{item.name}</span>
                                       </div>
                                       <button 
                                           className={`btn btn-sm ${isSelected ? 'btn-primary text-white' : 'btn-outline-primary'}`} 
@@ -782,8 +782,7 @@ export default function TechnicianDashboard({
                                   <div className="rounded-circle d-flex align-items-center justify-content-center text-white" style={{ width: '24px', height: '24px', background: status.color, flexShrink: 0 }}>
                                       <i className={`bi ${conf.icon}`} style={{ fontSize: '12px' }}></i>
                                   </div>
-                                  <h6 className="mb-0 fw-bold text-truncate" style={{ fontSize: '13px', maxWidth: '200px' }}>{entity.name}</h6>
-                                  <span className={`badge ${status.badgeClass} ms-auto`} style={{ fontSize: '10px' }}>{status.label}</span>
+                                  <h6 className="mb-0 fw-bold popup-title-readable">{entity.name}</h6>
                               </div>
                                 );
                               })()}
