@@ -357,6 +357,7 @@ export default function PppoeDashboard({ readOnly = false }) {
     const username = user.username;
     const key = `toggle-${username}`;
     const nextDisabled = !user.disabled;
+    let previousUser = null;
     
     setActionLoading(prev => ({ ...prev, [key]: true }));
     
@@ -364,15 +365,17 @@ export default function PppoeDashboard({ readOnly = false }) {
       const changedAt = new Date().toISOString();
       setPppoeUsers((prev) => prev.map((item) => {
         if (String(item.username) !== String(username)) return item;
+        previousUser = item;
         return {
           ...item,
+          routerId: item.routerId ?? selectedRouter,
           disabled: nextDisabled,
           isOnline: nextDisabled ? false : item.isOnline,
           ip: nextDisabled ? null : item.ip,
           remoteAddress: nextDisabled ? null : item.remoteAddress,
           localAddress: nextDisabled ? null : item.localAddress,
           uptime: nextDisabled ? null : item.uptime,
-          downtime: nextDisabled ? "0s" : null,
+          downtime: nextDisabled ? "0s" : item.downtime,
           lastSeen: nextDisabled ? changedAt : item.lastSeen,
           lastDisconnect: nextDisabled ? changedAt : item.lastDisconnect,
           realtimeUpdatedAt: Date.now(),
@@ -388,19 +391,18 @@ export default function PppoeDashboard({ readOnly = false }) {
       }
       
       triggerRowAnimation(username);
-      await loadUsers(selectedRouter);
-      
-      // Add a slight delay to allow the MikroTik to physically disconnect the session
-      // and the realtime background sync to catch up, preventing icon blinking.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
     } catch (err) {
       console.error(err);
-      await loadUsers(selectedRouter);
+      if (previousUser) {
+        setPppoeUsers((prev) => prev.map((item) => (
+          String(item.username) === String(username) ? previousUser : item
+        )));
+      }
       alert(err.response?.data?.message || err.message || "Failed to toggle status");
     } finally {
       setActionLoading(prev => ({ ...prev, [key]: false }));
     }
-  }, [readOnly, selectedRouter, loadUsers, triggerRowAnimation, setPppoeUsers]);
+  }, [readOnly, selectedRouter, triggerRowAnimation, setPppoeUsers]);
 
   /* ───────────────── RECONNECT SESSION HANDLER ───────────────── */
   const handleReconnectUser = useCallback(async (user) => {

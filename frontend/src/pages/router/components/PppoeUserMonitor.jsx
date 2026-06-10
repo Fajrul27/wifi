@@ -82,6 +82,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
       const processed = raw.map((u) => ({
         id: u.id,
+        routerId: u.routerId ?? routerId,
         username: u.username || "-",
         profile: u.profile || "-",
         ip: u.localAddress || u.remoteAddress || null,
@@ -103,7 +104,10 @@ export const usePppoeUserMonitor = (selectedRouter) => {
       }));
 
       if (isMountedRef.current) {
-        setUsers(processed);
+        setUsers((prev) => {
+          const otherRouters = prev.filter((u) => Number(u.routerId) !== Number(routerId));
+          return [...otherRouters, ...processed];
+        });
       }
       
       return { users: processed, metrics: res.data?.metrics || {} };
