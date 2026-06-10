@@ -268,7 +268,7 @@ controller.getUsers =
 
         trafficMap = await service.getMultipleInterfacesTraffic(activeInterfaces);
       } catch (connErr) {
-        console.warn(`[Router Offline] Could not connect to Mikrotik router ID ${routerId}:`, connErr.message);
+        console.warn(`[Router Offline] Could not connect to Mikrotik router ID ${routerId}:`, connErr?.message || String(connErr));
       }
 
       const activeMap = {};

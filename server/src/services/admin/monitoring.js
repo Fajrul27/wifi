@@ -12,6 +12,29 @@ const pppoeServices = new Map();
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* =========================
+   SAFE CLOSE HELPER
+========================= */
+async function closeClientSafely(client) {
+  if (!client) return;
+  try {
+    await Promise.race([
+      client.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Close Timeout")), 2000))
+    ]);
+  } catch (err) {
+    console.warn("[MONITOR] Safe close timeout/error, destroying connector:", err.message);
+    try {
+      if (client.connector) {
+        client.connector.destroy();
+      }
+    } catch (e) {}
+    client.connected = false;
+    client.connecting = false;
+    client.closing = false;
+  }
+}
+
+/* =========================
    CLEANUP
 ========================= */
 async function cleanupRouter(id) {
@@ -30,9 +53,7 @@ async function cleanupRouter(id) {
 
   const client = clients.get(id);
   if (client) {
-    try {
-      await client.close();
-    } catch {}
+    await closeClientSafely(client);
     clients.delete(id);
   }
 
@@ -51,18 +72,27 @@ async function getClient(router) {
     user: router.username,
     password: decrypt(router.password),
     port: router.port || 8728,
-    timeout: 20000,
+    timeout: 10,
   });
 
   client.on("error", (e) =>
-    console.error(`[RouterOS ${router.id} ERROR]`, e.message)
+    console.error(`[RouterOS ${router.id} ERROR]`, e?.message || String(e))
   );
 
   client.on("close", () =>
     console.warn(`[RouterOS ${router.id} CLOSED]`)
   );
 
-  await client.connect();
+  try {
+    const connectPromise = client.connect();
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Connection Timeout")), 10000);
+    });
+    await Promise.race([connectPromise, timeoutPromise]);
+  } catch (err) {
+    await closeClientSafely(client).catch(() => {});
+    throw err;
+  }
 
   clients.set(router.id, client);
 
@@ -72,10 +102,28 @@ async function getClient(router) {
 }
 
 /* =========================
+   WRITE WITH TIMEOUT
+========================= */
+async function writeWithTimeout(client, path, params, timeoutMs = 15000) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Write Timeout (Router disconnected?)")), timeoutMs);
+  });
+
+  const req = params ? client.write(path, params) : client.write(path);
+  
+  try {
+    return await Promise.race([req, timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* =========================
    SYSTEM
 ========================= */
 async function getSystem(client) {
-  const res = await client.write("/system/resource/print");
+  const res = await writeWithTimeout(client, "/system/resource/print");
   const d = res?.[0] || {};
 
   return {
@@ -92,7 +140,7 @@ async function getSystem(client) {
    TRAFFIC (🔥 PPPoE STYLE CONTRACT)
 ========================= */
 async function getTraffic(client, iface = "ether1") {
-  const res = await client.write("/interface/monitor-traffic", [
+  const res = await writeWithTimeout(client, "/interface/monitor-traffic", [
     `=interface=${iface}`,
     "=once",
   ]);
@@ -177,9 +225,17 @@ async function startRouterWorker(router) {
           data: realtime,
         });
 
+        if (global.io) {
+          const room = `router:${router.id}`;
+          global.io.to(room).emit("router-status", {
+            routerId: router.id,
+            isOnline: true,
+          });
+        }
+
         await delay(2000);
       } catch (err) {
-        console.warn(`⚠️ Router OFFLINE: ${router.name}`);
+        console.warn(`⚠️ Router OFFLINE: ${router.name}`, err.message || err);
 
         const offline = {
           routerId: router.id,
@@ -199,9 +255,7 @@ async function startRouterWorker(router) {
 
         const client = clients.get(router.id);
         if (client) {
-          try {
-            await client.close();
-          } catch {}
+          await closeClientSafely(client);
           clients.delete(router.id);
         }
 
@@ -210,6 +264,14 @@ async function startRouterWorker(router) {
           routerId: router.id,
           data: { isOnline: false },
         });
+
+        if (global.io) {
+          const room = `router:${router.id}`;
+          global.io.to(room).emit("router-status", {
+            routerId: router.id,
+            isOnline: false,
+          });
+        }
 
         await delay(5000);
       }

@@ -416,13 +416,19 @@ export default function TechnicianDashboard({
     filteredOltPorts.forEach(port => {
       const router = routers.find(r => Number(r.id) === Number(port.routerId));
       if (router && isValidCoord(router.latitude, router.longitude) && isValidCoord(port.latitude, port.longitude)) {
+        const isRouterOnline = !!router?.isOnline;
+        const lineColor = isRouterOnline ? '#0ea5e9' : '#ef4444';
+        const lineDash = isRouterOnline ? null : '8,6';
+        const lineWeight = isRouterOnline ? 4 : 5;
+
         lines.push({
           id: `router-olt-${port.id}`,
           coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
           type: 'router-to-olt',
-          color: '#0ea5e9',
-          weight: 4,
-          animate: true,
+          color: lineColor,
+          weight: lineWeight,
+          dashArray: lineDash,
+          animate: isRouterOnline,
           label: `Router ${router.name} ➔ OLT Port ${port.name}`
         });
       }

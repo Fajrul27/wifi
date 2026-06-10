@@ -128,6 +128,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
   /* ───────── FILTER & SORT ───────── */
   const filteredUsers = useMemo(() => {
     return users
+      .filter((u) => Number(u.routerId) === Number(selectedRouter))
       .filter((u) => {
         const name = (u.username || "").toLowerCase();
 
@@ -164,7 +165,7 @@ export const usePppoeUserMonitor = (selectedRouter) => {
 
         return 0;
       });
-  }, [users, searchQuery, filterStatus, locationFilter, sortBy]);
+  }, [users, selectedRouter, searchQuery, filterStatus, locationFilter, sortBy]);
 
   const onlineUsers = useMemo(
     () => filteredUsers.filter((u) => u.isOnline).length,

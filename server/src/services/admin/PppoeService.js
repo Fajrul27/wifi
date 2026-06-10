@@ -11,6 +11,29 @@ const logDebug = (msg) => {
 const { broadcast } = require("../../utils/socket");
 const { decrypt } = require("../../utils/crypto");
 
+/* =========================
+   SAFE CLOSE HELPER
+========================= */
+async function closeClientSafely(client) {
+  if (!client) return;
+  try {
+    await Promise.race([
+      client.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Close Timeout")), 2000))
+    ]);
+  } catch (err) {
+    console.warn("[PPPoE] Safe close timeout/error, destroying connector:", err.message);
+    try {
+      if (client.connector) {
+        client.connector.destroy();
+      }
+    } catch (e) {}
+    client.connected = false;
+    client.connecting = false;
+    client.closing = false;
+  }
+}
+
 const PppoeProfileService = require("./PppoeProfileService");
 
 const prisma = require("../../utils/prisma");
@@ -110,59 +133,12 @@ const normalizeKey = (
 class PppoeService {
   constructor(router) {
     this.router = router;
-    // Track known online status to prevent duplicate log on status change
     this.knownOnlineStatus = new Map();
 
-    const password = decrypt(
-      router.password
-    );
-
-    this.client = new RouterOSAPI({
-      host: router.host,
-      user: router.username,
-      password,
-      port: router.port || 8728,
-      timeout: 15000,
-    });
-
-    /* =========================
-       EVENTS
-    ========================= */
-    this.client.on(
-      "error",
-      (err) => {
-        console.error(
-          "[RouterOS ERROR]",
-          err.message
-        );
-
-        this.isConnected = false;
-      }
-    );
-
-    this.client.on("close", () => {
-      console.warn(
-        "[RouterOS CLOSED]"
-      );
-
-      this.isConnected = false;
-    });
-
-    this.client.on(
-      "timeout",
-      () => {
-        console.warn(
-          "[RouterOS TIMEOUT]"
-        );
-
-        this.isConnected = false;
-      }
-    );
-
+    this.client = null;
+    this.isConnected = false;
     this.isRunning = false;
-
     this.interval = null;
-
     this.updating = false;
 
     this.cacheActive = [];
@@ -173,8 +149,6 @@ class PppoeService {
     this.cacheSecretsTime = 0;
     this.cacheSecretsTTL = 10000;
 
-    this.isConnected = false;
-
     this.profileService = null;
     this.profileInterval = null;
   }
@@ -183,50 +157,108 @@ class PppoeService {
      CONNECT
   ========================= */
   async connect() {
-    try {
-      if (this.isConnected)
-        return;
+    if (this.isConnected && this.client) return;
 
-      await this.client.connect();
-
-      this.isConnected = true;
-
-      /* INIT PROFILE SERVICE */
-      if (!this.profileService) {
-        this.profileService =
-          new PppoeProfileService(
-            this.router,
-            this.client
-          );
-      }
-    } catch (e) {
-      // console.error(
-      //   "[PPPoE] Router connect error:",
-      //   e.message
-      // );
-
-      this.isConnected = false;
-
-      throw e;
+    if (this._connectingPromise) {
+      return await this._connectingPromise;
     }
+
+    this._connectingPromise = (async () => {
+      try {
+        if (this.isConnected && this.client) return;
+
+        if (this.client) {
+          closeClientSafely(this.client).catch(() => {});
+          try {
+            this.client.removeAllListeners();
+          } catch (e) {}
+        }
+
+        const password = decrypt(this.router.password);
+
+        this.client = new RouterOSAPI({
+          host: this.router.host,
+          user: this.router.username,
+          password,
+          port: this.router.port || 8728,
+          timeout: 10,
+        });
+
+        this.client.on("error", (err) => {
+          console.error(`[RouterOS ${this.router.id} ERROR]`, err?.message || String(err));
+          this.isConnected = false;
+        });
+
+        this.client.on("close", () => {
+          console.warn(`[RouterOS ${this.router.id} CLOSED]`);
+          this.isConnected = false;
+        });
+
+        this.client.on("timeout", () => {
+          console.warn(`[RouterOS ${this.router.id} TIMEOUT]`);
+          this.isConnected = false;
+        });
+
+        try {
+          const connectPromise = this.client.connect();
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("Connection Timeout")), 10000);
+          });
+          await Promise.race([connectPromise, timeoutPromise]);
+        } catch (err) {
+          closeClientSafely(this.client).catch(() => {});
+          throw err;
+        }
+
+        this.isConnected = true;
+
+        if (!this.profileService) {
+          this.profileService = new PppoeProfileService(this.router, this);
+        } else {
+          this.profileService.client = this;
+        }
+      } catch (e) {
+        this.isConnected = false;
+        throw e;
+      } finally {
+        this._connectingPromise = null;
+      }
+    })();
+
+    return await this._connectingPromise;
   }
 
   /* =========================
-     WRITE
+     WRITE WITH TIMEOUT
   ========================= */
-  async write(path, params) {
+  async write(path, params, timeoutMs = 15000) {
     await this.connect();
-    return this.client.write(path, params);
+    
+    let timer;
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        this.isConnected = false;
+        closeClientSafely(this.client).catch(() => {});
+        reject(new Error("Write Timeout (Router disconnected?)"));
+      }, timeoutMs);
+    });
+
+    const req = params ? this.client.write(path, params) : this.client.write(path);
+    
+    try {
+      return await Promise.race([req, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /* =========================
      CLOSE
   ========================= */
   async close() {
-    try {
-      await this.client.close();
-    } catch { }
-
+    if (this.client) {
+      await closeClientSafely(this.client);
+    }
     this.isConnected = false;
   }
 
@@ -234,10 +266,8 @@ class PppoeService {
      GET SECRET
   ========================= */
   async getSecret(username) {
-    await this.connect();
-
     const result =
-      await this.client.write(
+      await this.write(
         "/ppp/secret/print",
         [`?name=${username}`]
       );
@@ -249,10 +279,8 @@ class PppoeService {
      GET ALL USERS
   ========================= */
   async getUsers() {
-    await this.connect();
-
     const users =
-      await this.client.write(
+      await this.write(
         "/ppp/secret/print"
       );
 
@@ -286,7 +314,7 @@ class PppoeService {
     if (this.supportedKeys) return this.supportedKeys;
 
     try {
-      const secrets = await this.client.write("/ppp/secret/print", ["?#.limit=1"]);
+      const secrets = await this.write("/ppp/secret/print", ["?#.limit=1"]);
       if (secrets && secrets.length > 0) {
         this.supportedKeys = Object.keys(secrets[0]);
         return this.supportedKeys;
@@ -358,7 +386,7 @@ class PppoeService {
     addParam("remote-ipv6-prefix-pool", data["remote-ipv6-prefix-pool"]);
 
     /* CREATE USER */
-    await this.client.write(
+    await this.write(
       "/ppp/secret/add",
       params
     );
@@ -407,13 +435,13 @@ class PppoeService {
 
     /* REMOVE ACTIVE */
     const active =
-      await this.client.write(
+      await this.write(
         "/ppp/active/print",
         [`?name=${username}`]
       );
 
     if (active?.length) {
-      await this.client.write(
+      await this.write(
         "/ppp/active/remove",
         [
           `=.id=${active[0][".id"]
@@ -423,7 +451,7 @@ class PppoeService {
     }
 
     /* REMOVE SECRET */
-    await this.client.write(
+    await this.write(
       "/ppp/secret/remove",
       [
         `=.id=${secret[".id"]}`,
@@ -475,8 +503,7 @@ class PppoeService {
     this._fetchingSecrets = (async () => {
       try {
         const version = this.cacheVersion || 0;
-        await this.connect();
-        const data = await this.client.write("/ppp/secret/print");
+        const data = await this.write("/ppp/secret/print");
         
         if (version !== (this.cacheVersion || 0)) {
           this._fetchingSecrets = null;
@@ -511,8 +538,7 @@ class PppoeService {
     this._fetchingActive = (async () => {
       try {
         const version = this.cacheVersion || 0;
-        await this.connect();
-        const data = await this.client.write("/ppp/active/print");
+        const data = await this.write("/ppp/active/print");
         
         if (version !== (this.cacheVersion || 0)) {
           this._fetchingActive = null;
@@ -538,7 +564,7 @@ class PppoeService {
   ) {
     try {
       const t =
-        await this.client.write(
+        await this.write(
           "/interface/monitor-traffic",
           [
             `=interface=${interfaceName}`,
@@ -577,11 +603,10 @@ class PppoeService {
       return {};
     }
     try {
-      await this.connect();
       const trafficMap = {};
       
       // Bulk read all interface statistics with .proplist filter (highly efficient)
-      const interfaces = await this.client.write("/interface/print", [
+      const interfaces = await this.write("/interface/print", [
         "=.proplist=name,rx-byte,tx-byte"
       ]);
       
@@ -643,10 +668,8 @@ class PppoeService {
      SYNC USERS
   ========================= */
   async syncUsers() {
-    await this.connect();
-
     const secrets =
-      await this.client.write(
+      await this.write(
         "/ppp/secret/print"
       );
 
@@ -816,9 +839,8 @@ class PppoeService {
 
     try {
       logDebug("updateRealtime: connecting...");
-      await this.connect();
       try {
-        const sampleSecret = await this.client.write("/ppp/secret/print");
+        const sampleSecret = await this.write("/ppp/secret/print");
         logDebug("SAMPLE SECRET: " + JSON.stringify(sampleSecret?.[0], null, 2));
       } catch (err) {
         logDebug("SAMPLE SECRET ERROR: " + err.message);
@@ -1054,14 +1076,149 @@ class PppoeService {
       logDebug("updateRealtime: successfully finished!");
     } catch (err) {
       logDebug("updateRealtime: error: " + err.message + "\n" + err.stack);
-      // console.error(
-      //   "[PPPoE] Realtime error:",
-      //   err.message
-      // );
-
       this.isConnected = false;
+      await this.handleRouterOffline();
     } finally {
       this.updating = false;
+    }
+  }
+
+  /* =========================
+     HANDLE ROUTER OFFLINE (SET ALL USERS OFFLINE)
+  ========================= */
+  async handleRouterOffline() {
+    try {
+      const users = await prisma.pppoeUser.findMany({
+        where: {
+          routerId: this.router.id,
+        },
+        select: {
+          id: true,
+          username: true,
+          profile: true,
+          isOnline: true,
+          lastSeen: true,
+          lastDisconnect: true,
+          createdAt: true,
+          localAddress: true,
+          remoteAddress: true,
+          latitude: true,
+          longitude: true,
+          roadCoordinates: true,
+          whatsapp: true,
+          address: true,
+          photoUrl: true,
+          photoUrl2: true,
+          photoUrl3: true,
+          odpPort: {
+            select: {
+              odpId: true
+            }
+          }
+        }
+      });
+
+      const dbUpdates = [];
+      const realtimeUsers = [];
+
+      for (const user of users) {
+        const updatedLastDisconnect = user.isOnline ? new Date() : user.lastDisconnect;
+        
+        if (user.isOnline) {
+          dbUpdates.push(
+            prisma.pppoeUser.update({
+              where: { id: user.id },
+              data: {
+                isOnline: false,
+                lastDisconnect: updatedLastDisconnect,
+                localAddress: null,
+                remoteAddress: null,
+              }
+            })
+          );
+        }
+
+        let downtime = null;
+        const baseTime = updatedLastDisconnect || user.lastSeen || user.createdAt;
+        if (baseTime) {
+          const diff = Date.now() - new Date(baseTime).getTime();
+          downtime = formatDuration(diff);
+        }
+
+        realtimeUsers.push({
+          id: user.id,
+          routerId: this.router.id,
+          username: user.username,
+          profile: user.profile,
+          disabled: false,
+          isOnline: false,
+          uptime: null,
+          downtime,
+          lastSeen: user.lastSeen,
+          lastDisconnect: updatedLastDisconnect,
+          rxBps: 0,
+          txBps: 0,
+          rxHuman: "0 bps",
+          txHuman: "0 bps",
+          localAddress: null,
+          remoteAddress: null,
+          latitude: user.latitude ?? null,
+          longitude: user.longitude ?? null,
+          whatsapp: user.whatsapp ?? null,
+          address: user.address ?? null,
+          photoUrl: user.photoUrl ?? null,
+          photoUrl2: user.photoUrl2 ?? null,
+          photoUrl3: user.photoUrl3 ?? null,
+          topologyNodeId: user.odpPort?.odpId ? (user.odpPort.odpId + 100000) : null,
+          roadCoordinates: (() => {
+            if (!user.roadCoordinates) return null;
+            try {
+              return JSON.parse(user.roadCoordinates);
+            } catch (e) {
+              return null;
+            }
+          })(),
+        });
+      }
+
+      if (dbUpdates.length > 0) {
+        logDebug("handleRouterOffline: marking " + dbUpdates.length + " users offline in DB");
+        const LogService = require("../../services/admin/LogService");
+        
+        for (const user of users) {
+          if (user.isOnline) {
+            const lastKnown = this.knownOnlineStatus.get(user.id);
+            if (lastKnown === undefined || lastKnown !== false) {
+              this.knownOnlineStatus.set(user.id, false);
+              LogService.addLog(
+                `Client ${user.username} is now Offline (Router Offline)`,
+                "danger"
+              ).catch(() => {});
+            }
+          }
+        }
+
+        await Promise.all(dbUpdates);
+      }
+
+      this.cachedRealtimeUsers = realtimeUsers;
+      const serialized = serialize(realtimeUsers);
+      
+      const payload = {
+        type: "pppoe-realtime",
+        routerId: this.router.id,
+        data: serialized,
+        ts: Date.now(),
+      };
+
+      broadcast(payload);
+
+      if (global.io) {
+        const room = `router:${this.router.id}`;
+        global.io.to(room).emit("pppoe-realtime", payload);
+      }
+    } catch (err) {
+      console.error("Error setting users offline when router offline:", err?.message || String(err));
     }
   }
 
@@ -1102,12 +1259,8 @@ class PppoeService {
     this.isRunning = false;
 
     if (this.client) {
-      try {
-        await this.client.close();
-        this.isConnected = false;
-      } catch (e) {
-        console.error("[PPPoE] Error closing RouterOS client:", e.message);
-      }
+      await closeClientSafely(this.client);
+      this.isConnected = false;
     }
   }
 }

@@ -9,7 +9,7 @@ const getApiBaseURL = () => {
     return "/api";
   }
 
-  return "http://localhost:5000/api";
+  return "http://localhost:3000/api";
 };
 
 const api = axios.create({

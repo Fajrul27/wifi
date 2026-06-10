@@ -14,6 +14,7 @@ import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import api from "../../services/api";
 import { socket } from "../../services/socket";
+import { useGlobalRealtime } from "../../context/GlobalRealtimeContext";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -904,21 +905,22 @@ function FilterBar({ searchQuery, setSearchQuery, statusFilter, setStatusFilter 
 // 🗺️ MAIN COMPONENT
 // =========================
 export default function NocPppoeMap() {
-  const [isRouterLocked, setIsRouterLocked] = useState(() => localStorage.getItem('lock_router') === 'true');
-  const [routers, setRouters] = useState([]);
-  const [selectedRouter, setSelectedRouter] = useState(() => {
-     if (localStorage.getItem('lock_router') === 'true') {
-         const saved = localStorage.getItem('locked_router_id');
-         if (saved) return Number(saved);
-     }
-     return null;
-  });
+  const {
+    routers,
+    selectedRouter,
+    setSelectedRouter,
+    isRouterLocked,
+    setIsRouterLocked,
+    isInitialized,
+    isRouterConnected,
+    pppoeUsers,
+  } = useGlobalRealtime();
+
   const [router, setRouter] = useState(null);
-  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [mapTheme, setMapTheme] = useState(() => localStorage.getItem('locked_map_theme_ftth') || "osm");
-
+  
   useEffect(() => {
     localStorage.setItem('locked_map_theme_ftth', mapTheme);
   }, [mapTheme]);
@@ -927,64 +929,42 @@ export default function NocPppoeMap() {
   const [mapZoom, setMapZoom] = useState(8);
   const [visibleBounds, setVisibleBounds] = useState(null);
 
-  // Load routers
-  const loadRouters = async () => {
+  // Load router data
+  const loadRouterData = async (routerId) => {
+    if (!routerId) return;
     try {
       setLoading(true);
-      const res = await api.get("/routers");
-      setRouters(res.data);
-      if (!selectedRouter && res.data.length > 0) {
-        setSelectedRouter(prev => prev || res.data[0].id);
-      }
+      const res = await api.get(`/routers/${routerId}`);
+      setRouter(res.data);
+      setError(null);
     } catch (err) {
-      setError("Failed to load routers");
-      console.error("Router error:", err);
+      setError("Failed to load router data");
+      console.error("Load error:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Load router data
-  const loadRouterData = async (routerId) => {
-    if (!routerId) return;
-    try {
-      const [routerRes, userRes] = await Promise.all([
-        api.get(`/routers/${routerId}`),
-        api.get(`/pppoe/${routerId}`),
-      ]);
-      setRouter(routerRes.data);
-      setUsers(userRes.data.data || userRes.data || []);
-      setError(null);
-    } catch (err) {
-      setError("Failed to load router data");
-      console.error("Load error:", err);
+  // Sync / load when selectedRouter or routers change
+  useEffect(() => {
+    if (selectedRouter) {
+      loadRouterData(selectedRouter);
+    } else if (routers.length > 0) {
+      setSelectedRouter(routers[0].id);
+    } else if (isInitialized) {
+      setLoading(false);
     }
-  };
+  }, [selectedRouter, routers, isInitialized, setSelectedRouter]);
 
-  // Initial load
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadRouters(); }, []);
+  const isLoading = !isInitialized || loading;
 
-  // Load when router changes
-  useEffect(() => {
-    if (selectedRouter) loadRouterData(selectedRouter);
-  }, [selectedRouter]);
-
-  // Socket realtime
-  useEffect(() => {
-    const handleUpdate = (msg) => {
-      if (Number(msg.routerId) !== Number(selectedRouter)) return;
-      if (Array.isArray(msg.data)) {
-        setUsers(msg.data);
-      }
-    };
-    socket.on("pppoe-realtime", handleUpdate);
-    return () => socket.off("pppoe-realtime", handleUpdate);
-  }, [selectedRouter]);
+  const selectedRouterUsers = useMemo(() => {
+    return pppoeUsers.filter((u) => Number(u.routerId) === Number(selectedRouter));
+  }, [pppoeUsers, selectedRouter]);
 
   // Filter users
   const filteredUsers = useMemo(() => {
-    return users
+    return selectedRouterUsers
       .filter((u) => u.latitude && u.longitude)
       .filter((u) => {
         if (statusFilter === "online" && !u.isOnline) return false;
@@ -999,7 +979,7 @@ export default function NocPppoeMap() {
         }
         return true;
       });
-  }, [users, statusFilter, searchQuery]);
+  }, [selectedRouterUsers, statusFilter, searchQuery]);
 
   const usersInViewCount = useMemo(() => {
     if (!visibleBounds) return filteredUsers.length;
@@ -1054,7 +1034,7 @@ export default function NocPppoeMap() {
   };
 
   // Loading state
-  if (loading && !routers.length) {
+  if (isLoading && !routers.length) {
     return (
       <>
         <StyleInjector />
@@ -1075,7 +1055,7 @@ export default function NocPppoeMap() {
           <span style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>⚠️</span>
           <p style={{ fontWeight: 500 }}>{error}</p>
           <button
-            onClick={loadRouters}
+            onClick={() => selectedRouter && loadRouterData(selectedRouter)}
             style={{
               marginTop: "1rem",
               padding: "0.5rem 1.25rem",
@@ -1160,7 +1140,7 @@ export default function NocPppoeMap() {
 
         {/* Controls */}
         <div className="noc-controls">
-          <StatsPanel users={users} routers={routers} selectedRouter={selectedRouter} />
+          <StatsPanel users={selectedRouterUsers} routers={routers} selectedRouter={selectedRouter} />
           <FilterBar
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
@@ -1221,16 +1201,17 @@ export default function NocPppoeMap() {
             {/* Router Marker */}
             {router?.latitude && router?.longitude && (
               <Marker
+                key={`router-${router.id}-${isRouterConnected ? 'online' : 'offline'}`}
                 position={[router.latitude, router.longitude]}
-                icon={createRouterIcon(router.isOnline !== false)}
+                icon={createRouterIcon(isRouterConnected)}
                 zIndexOffset={1000}
               >
                 <Popup className="noc-popup" autoPan={false}>
                   <>
                     <div className="popup-header">
                       <strong>🖥️ {router.name}</strong>
-                      <span className={`status-badge ${router.isOnline !== false ? "" : "offline"}`}>
-                        {router.isOnline !== false ? "🟢 Online" : "🔴 Offline"}
+                      <span className={`status-badge ${isRouterConnected ? "" : "offline"}`}>
+                        {isRouterConnected ? "🟢 Online" : "🔴 Offline"}
                       </span>
                     </div>
                     <div className="popup-body">

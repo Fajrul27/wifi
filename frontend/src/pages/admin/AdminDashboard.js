@@ -547,21 +547,27 @@ export default function AdminDashboard({
     });
 
     routerOltGroups.forEach(({ router, oltName, ports }, groupKey) => {
-      const sortedPorts = [...ports].sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+       const sortedPorts = [...ports].sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
       const activeGroupPort = activePopup?.type === 'oltPort'
         ? sortedPorts.find(p => Number(p.id) === Number(activePopup.id))
         : null;
       const routedPort = sortedPorts.find(p => sanitizeCoordinates(p.roadCoordinates));
       const representativePort = activeGroupPort || routedPort || sortedPorts[0];
 
+      const isRouterOnline = !!router?.isOnline;
+      const lineColor = isRouterOnline ? '#0ea5e9' : '#ef4444';
+      const lineDash = isRouterOnline ? null : '8,6';
+      const lineWeight = isRouterOnline ? 4 : 5;
+
       lines.push({
         id: `router-olt-group-${groupKey}`,
         portIds: sortedPorts.map(p => p.id),
         coordinates: buildCableCoordinates(representativePort.roadCoordinates, router.latitude, router.longitude, representativePort.latitude, representativePort.longitude),
         type: 'router-to-olt',
-        color: '#0ea5e9',
-        weight: 4,
-        animate: true,
+        color: lineColor,
+        weight: lineWeight,
+        dashArray: lineDash,
+        animate: isRouterOnline,
         label: sortedPorts.length > 1
           ? `Router ${router.name} ➔ ${oltName} (${sortedPorts.length} Ports)`
           : `Router ${router.name} ➔ OLT Port ${representativePort.name}`

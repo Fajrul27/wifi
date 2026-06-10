@@ -250,7 +250,35 @@ export function GlobalRealtimeProvider({ children }) {
               },
             }));
           } else if (msg.type === "router-status") {
-            setIsRouterConnected(!!msg.data?.isOnline);
+            const isOnline = !!msg.data?.isOnline;
+            const routerId = msg.routerId;
+            setRouters((prev) =>
+              prev.map((r) => {
+                if (Number(r.id) === Number(routerId)) {
+                  return { ...r, isOnline };
+                }
+                return r;
+              })
+            );
+            if (Number(routerId) === Number(selectedRouter)) {
+              setIsRouterConnected(isOnline);
+            }
+            if (!isOnline) {
+              setPppoeUsers((prev) =>
+                prev.map((u) => {
+                  if (Number(u.routerId) === Number(routerId)) {
+                    return {
+                      ...u,
+                      isOnline: false,
+                      rx: 0,
+                      tx: 0,
+                      uptime: null,
+                    };
+                  }
+                  return u;
+                })
+              );
+            }
           }
         } catch (e) {
           console.error("WS ERROR:", e);
@@ -448,9 +476,23 @@ export function GlobalRealtimeProvider({ children }) {
       routersTrafficRef.current[data.routerId] = { rx: sumRx, tx: sumTx };
 
       if (Number(data?.routerId) !== Number(selectedRouter)) return;
-      if (incoming.length === 0) return;
 
       setPppoeUsers((prev) => {
+        if (incoming.length === 0) {
+          return prev.map((u) => {
+            if (Number(u.routerId) === Number(data.routerId)) {
+              return {
+                ...u,
+                isOnline: false,
+                rx: 0,
+                tx: 0,
+                uptime: null,
+              };
+            }
+            return u;
+          });
+        }
+
         const map = new Map(prev.map((u) => [u.id, u]));
         for (const r of incoming) {
           const old = map.get(r.id) || {};
@@ -492,6 +534,45 @@ export function GlobalRealtimeProvider({ children }) {
 
     socket.on("pppoe-realtime", handlePppoeRealtime);
     return () => socket.off("pppoe-realtime", handlePppoeRealtime);
+  }, [selectedRouter, isLoginPage]);
+
+  // ─── Socket: router-status ───────────────────────────────────────────────
+  useEffect(() => {
+    if (isLoginPage) return;
+    const handleRouterStatus = (data) => {
+      const isOnline = !!data?.isOnline;
+      const routerId = data?.routerId;
+      setRouters((prev) =>
+        prev.map((r) => {
+          if (Number(r.id) === Number(routerId)) {
+            return { ...r, isOnline };
+          }
+          return r;
+        })
+      );
+      if (Number(routerId) === Number(selectedRouter)) {
+        setIsRouterConnected(isOnline);
+      }
+      if (!isOnline) {
+        setPppoeUsers((prev) =>
+          prev.map((u) => {
+            if (Number(u.routerId) === Number(routerId)) {
+              return {
+                ...u,
+                isOnline: false,
+                rx: 0,
+                tx: 0,
+                uptime: null,
+              };
+            }
+            return u;
+          })
+        );
+      }
+    };
+
+    socket.on("router-status", handleRouterStatus);
+    return () => socket.off("router-status", handleRouterStatus);
   }, [selectedRouter, isLoginPage]);
 
   // ─── Socket: topology-status-realtime ────────────────────────────────────
