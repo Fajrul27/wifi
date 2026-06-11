@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "../admin/AdminDashboard.css";
 import L from "leaflet";
-import { createCustomIcon, MARKER_CONFIG, isValidCoord, buildCableCoordinates, getMapEntityStatus } from "../admin/utils/mapUtils";
+import { createCustomIcon, MARKER_CONFIG, isValidCoord, sanitizeCoordinates, buildCableCoordinates, getMapEntityStatus } from "../admin/utils/mapUtils";
 import { FitMapBounds, MemoizedPolyline, MemoizedMarker } from "../admin/components/DashboardMapComponents";
 import DashboardKpiCards from "../admin/components/DashboardKpiCards";
 import DashboardBandwidthChart from "../admin/components/DashboardBandwidthChart";
@@ -413,25 +413,47 @@ export default function TechnicianDashboard({
     if (!showLines) return [];
     const lines = [];
 
+    // GROUP router-to-OLT cables by OLT device location (same as Admin Dashboard)
+    // so that multiple ports on the same OLT only draw ONE cable.
+    const routerOltGroups = new Map();
     filteredOltPorts.forEach(port => {
       const router = routers.find(r => Number(r.id) === Number(port.routerId));
-      if (router && isValidCoord(router.latitude, router.longitude) && isValidCoord(port.latitude, port.longitude)) {
-        const isRouterOnline = !!router?.isOnline;
-        const lineColor = isRouterOnline ? '#0ea5e9' : '#ef4444';
-        const lineDash = isRouterOnline ? null : '8,6';
-        const lineWeight = isRouterOnline ? 4 : 5;
-
-        lines.push({
-          id: `router-olt-${port.id}`,
-          coordinates: buildCableCoordinates(port.roadCoordinates, router.latitude, router.longitude, port.latitude, port.longitude),
-          type: 'router-to-olt',
-          color: lineColor,
-          weight: lineWeight,
-          dashArray: lineDash,
-          animate: isRouterOnline,
-          label: `Router ${router.name} ➔ OLT Port ${port.name}`
-        });
+      if (isValidCoord(router?.latitude, router?.longitude) && isValidCoord(port.latitude, port.longitude)) {
+        const oltName = port.oltName || (port.name ? port.name.split(" - Port ")[0] : 'OLT');
+        const groupKey = `${port.routerId}-${port.oltId || oltName}-${Number(port.latitude).toFixed(6)}-${Number(port.longitude).toFixed(6)}`;
+        if (!routerOltGroups.has(groupKey)) {
+          routerOltGroups.set(groupKey, { router, oltName, ports: [] });
+        }
+        routerOltGroups.get(groupKey).ports.push(port);
       }
+    });
+
+    routerOltGroups.forEach(({ router, oltName, ports }, groupKey) => {
+      const sortedPorts = [...ports].sort((a, b) => Number(a.portNumber || 0) - Number(b.portNumber || 0));
+      const activeGroupPort = activePopup?.type === 'oltPort'
+        ? sortedPorts.find(p => Number(p.id) === Number(activePopup.id))
+        : null;
+      const routedPort = sortedPorts.find(p => sanitizeCoordinates(p.roadCoordinates));
+      const representativePort = activeGroupPort || routedPort || sortedPorts[0];
+
+      const isRouterOnline = !!router?.isOnline;
+      const lineColor = isRouterOnline ? '#0ea5e9' : '#ef4444';
+      const lineDash = isRouterOnline ? null : '8,6';
+      const lineWeight = isRouterOnline ? 4 : 5;
+
+      lines.push({
+        id: `router-olt-group-${groupKey}`,
+        portIds: sortedPorts.map(p => p.id),
+        coordinates: buildCableCoordinates(representativePort.roadCoordinates, router.latitude, router.longitude, representativePort.latitude, representativePort.longitude),
+        type: 'router-to-olt',
+        color: lineColor,
+        weight: lineWeight,
+        dashArray: lineDash,
+        animate: isRouterOnline,
+        label: sortedPorts.length > 1
+          ? `Router ${router.name} ➔ ${oltName} (${sortedPorts.length} Ports)`
+          : `Router ${router.name} ➔ OLT Port ${representativePort.name}`
+      });
     });
 
     filteredNodes.filter(n => n.type === 'ODC' && n.oltPortId && !n.incomingLinks?.length && !n.parentNodeId).forEach(node => {
